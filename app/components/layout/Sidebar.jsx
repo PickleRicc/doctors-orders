@@ -94,11 +94,13 @@ export default function Sidebar({ user }) {
       <div className="p-4 mt-auto border-t border-shadow-200">
         <div className="flex items-center mb-3">
           <div className="h-9 w-9 rounded-full bg-royal/20 flex items-center justify-center text-royal mr-3">
-            <span className="text-sm font-medium">T</span>
+            <span className="text-sm font-medium">
+              {user?.email ? user.email[0].toUpperCase() : user?.user_metadata?.full_name ? user.user_metadata.full_name[0].toUpperCase() : '?'}
+            </span>
           </div>
           <div>
-            <p className="text-sm font-medium text-white">test1121@gmail.com</p>
-            <p className="text-xs text-white/50">Test User</p>
+            <p className="text-sm font-medium text-white">{user?.email || 'No email'}</p>
+            <p className="text-xs text-white/50">{user?.user_metadata?.full_name || 'User'}</p>
           </div>
         </div>
         
