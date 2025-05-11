@@ -62,8 +62,8 @@ export default function LandingPage() {
               <div className="relative w-full max-w-4xl">
                 <Safari 
                   url="app.doctorsorders.ai/create-note" 
-                  width="100%" 
-                  height="100%" 
+                  width={1200} 
+                  height={700} 
                   mode="default"
                 />
                 {/* Placeholder for screenshot - will be replaced with actual app screenshot */}
