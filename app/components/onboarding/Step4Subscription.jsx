@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useOnboardingStore } from "../../utils/store/onboardingStore";
 import { SectionTitle, OptionButton, ContinueButton } from "./OnboardingComponents";
 import { signUpAction } from "../../actions";
@@ -26,6 +26,11 @@ export default function Step4Subscription() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const router = useRouter();
+  
+  // Reset onboarding store on initial load
+  useEffect(() => {
+    // No need to reset here as we want to keep the data from previous steps
+  }, []);
   
   // Available options for payment willingness
   const paymentOptions = [
@@ -59,11 +64,33 @@ export default function Step4Subscription() {
     setError(null);
     
     try {
+      // Get all the data we need from the store before async operations
+      // This prevents trying to access the store inside async functions
+      const storeData = {
+        email,
+        password,
+        fullName,
+        primaryRole: useOnboardingStore.getState().primaryRole || '',
+        currentDocumentationMethod: useOnboardingStore.getState().currentDocumentationMethod || '',
+        dailyDocumentationHours: useOnboardingStore.getState().dailyDocumentationHours || 0,
+        documentationFrustrations: useOnboardingStore.getState().documentationFrustrations || [],
+        delayedDocumentation: useOnboardingStore.getState().delayedDocumentation === true,
+        usingSpeechToText: useOnboardingStore.getState().usingSpeechToText === true,
+        currentSpeechToTextTool: useOnboardingStore.getState().currentSpeechToTextTool || '',
+        timeSavingPriority: useOnboardingStore.getState().timeSavingPriority || '',
+        valueRealtimeDictation: useOnboardingStore.getState().valueRealtimeDictation === true,
+        valueAiSoapStructure: useOnboardingStore.getState().valueAiSoapStructure === true,
+        valueAutoSyncExport: useOnboardingStore.getState().valueAutoSyncExport === true,
+        dailyNoteCount: useOnboardingStore.getState().dailyNoteCount || 0,
+        payingForTimeSavings: useOnboardingStore.getState().payingForTimeSavings || '',
+        preferredPlan: useOnboardingStore.getState().preferredPlan || ''
+      };
+      
       // Create form data with registration information
       const registrationData = new FormData();
-      registrationData.append("email", email);
-      registrationData.append("password", password);
-      registrationData.append("full_name", fullName);
+      registrationData.append("email", storeData.email);
+      registrationData.append("password", storeData.password);
+      registrationData.append("full_name", storeData.fullName);
       
       // Attempt to sign up the user
       const signUpResult = await signUpAction(registrationData);
@@ -79,23 +106,22 @@ export default function Step4Subscription() {
       try {
         // Prepare onboarding data for submission
         const onboardingData = new FormData();
-        const store = useOnboardingStore.getState();
         
         // Add all relevant onboarding data fields, with fallbacks for null values
-        onboardingData.append("primaryRole", store.primaryRole || '');
-        onboardingData.append("currentDocumentationMethod", store.currentDocumentationMethod || '');
-        onboardingData.append("dailyDocumentationHours", store.dailyDocumentationHours || 0);
-        onboardingData.append("documentationFrustrations", JSON.stringify(store.documentationFrustrations || []));
-        onboardingData.append("delayedDocumentation", store.delayedDocumentation === true ? 'true' : 'false');
-        onboardingData.append("usingSpeechToText", store.usingSpeechToText === true ? 'true' : 'false');
-        onboardingData.append("currentSpeechToTextTool", store.currentSpeechToTextTool || '');
-        onboardingData.append("timeSavingPriority", store.timeSavingPriority || '');
-        onboardingData.append("valueRealtimeDictation", store.valueRealtimeDictation === true ? 'true' : 'false');
-        onboardingData.append("valueAiSoapStructure", store.valueAiSoapStructure === true ? 'true' : 'false');
-        onboardingData.append("valueAutoSyncExport", store.valueAutoSyncExport === true ? 'true' : 'false');
-        onboardingData.append("dailyNoteCount", store.dailyNoteCount || 0);
-        onboardingData.append("payingForTimeSavings", store.payingForTimeSavings || '');
-        onboardingData.append("preferredPlan", store.preferredPlan || '');
+        onboardingData.append("primaryRole", storeData.primaryRole);
+        onboardingData.append("currentDocumentationMethod", storeData.currentDocumentationMethod);
+        onboardingData.append("dailyDocumentationHours", storeData.dailyDocumentationHours);
+        onboardingData.append("documentationFrustrations", JSON.stringify(storeData.documentationFrustrations));
+        onboardingData.append("delayedDocumentation", storeData.delayedDocumentation ? 'true' : 'false');
+        onboardingData.append("usingSpeechToText", storeData.usingSpeechToText ? 'true' : 'false');
+        onboardingData.append("currentSpeechToTextTool", storeData.currentSpeechToTextTool);
+        onboardingData.append("timeSavingPriority", storeData.timeSavingPriority);
+        onboardingData.append("valueRealtimeDictation", storeData.valueRealtimeDictation ? 'true' : 'false');
+        onboardingData.append("valueAiSoapStructure", storeData.valueAiSoapStructure ? 'true' : 'false');
+        onboardingData.append("valueAutoSyncExport", storeData.valueAutoSyncExport ? 'true' : 'false');
+        onboardingData.append("dailyNoteCount", storeData.dailyNoteCount);
+        onboardingData.append("payingForTimeSavings", storeData.payingForTimeSavings);
+        onboardingData.append("preferredPlan", storeData.preferredPlan);
         
         // Submit onboarding data
         const onboardingResult = await saveOnboardingData(onboardingData);
@@ -111,7 +137,7 @@ export default function Step4Subscription() {
         // We'll still proceed with redirection even if onboarding data saving fails
       }
       
-      // Reset the store 
+      // Reset the store
       reset();
       
       // Always redirect to success page - auth callback will redirect to dashboard from there
