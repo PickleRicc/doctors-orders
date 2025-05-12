@@ -1,17 +1,28 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { Mic, FileText, Activity, Clock, Calendar, Settings, PlusCircle } from "lucide-react";
+import DictationModal from "../components/dictation/DictationModal";
 
 /**
  * DashboardContent component (Client Component)
  * Renders the dashboard UI with data passed from the server component
  */
 export default function DashboardContent({ user, recentNotes, activityData }) {
+  const [isDictationModalOpen, setIsDictationModalOpen] = useState(false);
+  
+  const openDictationModal = () => {
+    setIsDictationModalOpen(true);
+  };
+  
+  const closeDictationModal = () => {
+    setIsDictationModalOpen(false);
+  };
   return (
     <div className="min-h-screen flex-1 md:ml-64">
       <div className="w-full">
-        <div className="p-6 max-w-6xl mx-auto">
+        <div className="p-6 max-w-6xl mx-auto dashboard">
       {/* Top Header with User Info */}
       <header className="flex justify-between items-center mb-6">
         <div>
@@ -68,17 +79,20 @@ export default function DashboardContent({ user, recentNotes, activityData }) {
           Quick Actions
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Link 
-            href="/dictation"
-            className="bg-royal hover:bg-royal-700 transition-colors rounded-lg p-4 flex items-center">
-            <div className="rounded-full p-3 mr-3 bg-royal-700">
+          <button 
+            onClick={openDictationModal}
+            className="relative bg-royal hover:bg-royal-700 transition-colors rounded-lg p-4 flex items-center w-full text-left overflow-hidden">
+            {/* Border Beam Effect */}
+            <div className="absolute inset-0 rounded-lg border border-royal/50 [background:linear-gradient(var(--royal),var(--royal))_padding-box,linear-gradient(to_right,#2563eb,transparent)_border-box] z-0 animate-pulse"></div>
+            
+            <div className="rounded-full p-3 mr-3 bg-royal-700 relative z-10">
               <Mic className="h-5 w-5" />
             </div>
-            <div>
+            <div className="relative z-10">
               <h3 className="text-base font-semibold mb-0.5">Start Recording</h3>
               <p className="text-white/70 text-sm">Create a new note with voice dictation</p>
             </div>
-          </Link>
+          </button>
           
           <Link 
             href="/notes"
@@ -173,6 +187,9 @@ export default function DashboardContent({ user, recentNotes, activityData }) {
       </section>
         </div>
       </div>
+      
+      {/* Dictation Modal */}
+      <DictationModal isOpen={isDictationModalOpen} onClose={closeDictationModal} />
     </div>
   );
 }

@@ -77,7 +77,12 @@ module.exports = {
   		},
   		fontFamily: {
   			sans: [
-  				'var(--font-inter)',
+  				'var(--font-plus-jakarta)',
+  				'system-ui',
+  				'sans-serif'
+  			],
+  			heading: [
+  				'Cal Sans',
   				'system-ui',
   				'sans-serif'
   			]

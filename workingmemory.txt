@@ -1,0 +1,189 @@
+# Doctors Orders - Working Memory
+Date: May 11, 2025
+
+## What We Built Today
+
+1. **Dashboard Layout Improvements**
+   - Fixed spacing and alignment issues in the dashboard layout
+   - Ensured proper sidebar integration with the main content
+   - Implemented responsive design for both mobile and desktop views
+   - Updated the UI to maintain the Shadow Black and Royal Blue theme
+
+2. **Authentication System Fixes**
+   - Resolved sign-in and sign-up errors in the production environment
+   - Fixed user data display in the sidebar
+   - Enhanced error handling in authentication actions
+
+3. **GitHub and Vercel Deployment**
+   - Set up GitHub repository for the project
+   - Configured Vercel deployment with proper environment variables
+   - Fixed build errors for production deployment
+
+## Issues Encountered and Solutions
+
+### 1. Dashboard Layout Issues
+
+**Problem**: White space appearing between sidebar and content, improper spacing and alignment.
+
+**Solution**:
+- Updated the dashboard layout structure to properly handle the sidebar:
+  ```jsx
+  <div className="min-h-screen bg-shadow text-white">
+    <Sidebar user={user} />
+    {children}
+  </div>
+  ```
+- Fixed content layout with proper padding:
+  ```jsx
+  <div className="min-h-screen flex-1 md:ml-64">
+    <div className="w-full">
+      <div className="p-6 max-w-6xl mx-auto">
+        {/* Content here */}
+      </div>
+    </div>
+  </div>
+  ```
+- Used responsive classes to handle mobile vs. desktop layouts:
+  ```jsx
+  <div className="pl-0 md:pl-64 w-full">
+  ```
+
+### 2. SVG viewBox Error
+
+**Problem**: Error in production: `Error: <svg> attribute viewBox: Expected number, "0 0 100% 100%"`.
+
+**Solution**:
+- Found that the Safari component from MagicUI was being used with percentage values:
+  ```jsx
+  <Safari 
+    url="app.doctorsorders.ai/create-note" 
+    width="100%" 
+    height="100%" 
+    mode="default"
+  />
+  ```
+- Fixed by using numeric values instead:
+  ```jsx
+  <Safari 
+    url="app.doctorsorders.ai/create-note" 
+    width={1200} 
+    height={700} 
+    mode="default"
+  />
+  ```
+- SVG viewBox attributes must contain numeric values, not percentages.
+
+### 3. Authentication Errors
+
+**Problem**: Server component errors during sign-in and registration.
+
+**Solution**:
+- Enhanced error handling in server actions:
+  ```javascript
+  try {
+    // Create Supabase client with error handling
+    let supabase;
+    try {
+      supabase = await createClient();
+    } catch (clientErr) {
+      console.error("Supabase client creation error:", clientErr);
+      return { error: "Unable to connect to authentication service" };
+    }
+
+    // Nested try/catch for specific operations
+    try {
+      // Authentication operations here
+    } catch (authErr) {
+      // Handle auth-specific errors
+    }
+  } catch (err) {
+    // Handle unexpected errors
+  }
+  ```
+- Fixed React hooks usage in the onboarding component:
+  - Moved data fetching outside of async functions
+  - Properly used useEffect hook instead of useState for side effects
+
+### 4. Vercel Deployment Issues
+
+**Problem**: "Unable to connect to authentication service" error in production.
+
+**Solution**:
+- Added environment variables to Vercel project settings:
+  - `NEXT_PUBLIC_SUPABASE_URL`
+  - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- Ensured proper error handling in authentication actions to provide better error messages
+
+### 5. Hardcoded User Data
+
+**Problem**: Sidebar showing hardcoded email "test1121@gmail.com" regardless of who was signed in.
+
+**Solution**:
+- Updated the sidebar component to use actual user data:
+  ```jsx
+  <p className="text-sm font-medium text-white">{user?.email || 'No email'}</p>
+  <p className="text-xs text-white/50">{user?.user_metadata?.full_name || 'User'}</p>
+  ```
+- Added dynamic avatar initial based on user email or name:
+  ```jsx
+  <span className="text-sm font-medium">
+    {user?.email ? user.email[0].toUpperCase() : user?.user_metadata?.full_name ? user.user_metadata.full_name[0].toUpperCase() : '?'}
+  </span>
+  ```
+
+## Tricks and Best Practices for Future Reference
+
+1. **Next.js App Router Layout Structure**
+   - Use a proper layout hierarchy with layout.jsx files
+   - Pass user data from server components to client components
+   - Avoid duplicating components like Sidebar in multiple places
+
+2. **Authentication Best Practices**
+   - Implement comprehensive error handling in server actions
+   - Use nested try/catch blocks for specific operations
+   - Never expose service role keys in client code
+   - Always use the anon key for client-side authentication
+
+3. **React Hooks Usage**
+   - Never use hooks inside async functions
+   - Use useEffect for side effects, not useState
+   - Fetch all necessary data before async operations
+
+4. **SVG Best Practices**
+   - Always use numeric values for viewBox attributes
+   - Avoid using percentage values in SVG attributes
+
+5. **Vercel Deployment**
+   - Always set up environment variables in Vercel project settings
+   - Test authentication in both local and production environments
+   - Fix build errors before deploying to production
+
+6. **Error Handling**
+   - Implement comprehensive error handling in server actions
+   - Provide user-friendly error messages
+   - Log detailed errors on the server side
+
+7. **CSS and Layout**
+   - Use responsive classes (md:, lg:) for different screen sizes
+   - Use proper spacing and alignment with Tailwind CSS
+   - Maintain consistent theming throughout the application
+
+## Next Steps and Improvements
+
+1. **Testing**
+   - Implement comprehensive testing for authentication flows
+   - Test the application on different devices and screen sizes
+
+2. **User Experience**
+   - Enhance error messages for better user feedback
+   - Improve loading states during authentication
+
+3. **Security**
+   - Implement proper CORS and CSP headers
+   - Ensure all sensitive operations are server-side
+
+4. **Performance**
+   - Optimize component rendering
+   - Implement proper caching strategies
+
+Remember these lessons for future projects to avoid making the same mistakes and to build more efficiently!
