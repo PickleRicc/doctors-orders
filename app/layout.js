@@ -1,13 +1,13 @@
-import { Plus_Jakarta_Sans } from "next/font/google";
+import { Roboto } from "next/font/google";
 import "./globals.css";
 
-// Load Plus Jakarta Sans font
-const plusJakartaSans = Plus_Jakarta_Sans({
+// Load Roboto font
+const roboto = Roboto({
   subsets: ["latin"],
   display: "swap",
-  variable: "--font-plus-jakarta",
+  variable: "--font-roboto",
   // Including the full range of weights
-  weight: ["200", "300", "400", "500", "600", "700", "800"],
+  weight: ["100", "300", "400", "500", "700", "900"],
   // Including italic styles
   style: ['normal', 'italic'],
 });
@@ -22,12 +22,9 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <head>
-        {/* Cal Sans is loaded via a regular stylesheet link */}
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link href="https://fonts.googleapis.com/css2?family=Cal+Sans&display=swap" rel="stylesheet" />
+        {/* Fonts are loaded through Next.js font optimization */}
       </head>
-      <body className={`${plusJakartaSans.variable} font-sans antialiased`}>
+      <body className={`${roboto.variable} font-sans antialiased`}>
         {children}
       </body>
     </html>

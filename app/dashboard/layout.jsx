@@ -18,7 +18,7 @@ export default async function DashboardLayout({ children }) {
   }
 
   return (
-    <div className="min-h-screen bg-shadow text-white">
+    <div className="min-h-screen bg-white text-gray-800">
       {/* Desktop Sidebar - Only shown on md+ screens */}
       <Sidebar user={user} />
       

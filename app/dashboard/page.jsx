@@ -51,7 +51,7 @@ export default async function Dashboard() {
 
   // Pass data to client component
   return (
-    <div className="flex-1">
+    <div className="flex-1 bg-gray-50">
       <DashboardContent 
         user={user}
         recentNotes={recentNotes}

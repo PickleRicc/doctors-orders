@@ -3,6 +3,218 @@
 import { useState, useEffect, useRef } from "react";
 import { X, Mic, Pause, Play, Square, Save, Check, ChevronDown, User, FileText, Settings } from "lucide-react";
 
+// Custom hook for audio visualization
+function useAudioVisualization(isRecording, isPaused) {
+  const canvasRef = useRef(null);
+  const animationRef = useRef(null);
+  const audioContextRef = useRef(null);
+  const analyserRef = useRef(null);
+  const dataArrayRef = useRef(null);
+  const sourceRef = useRef(null);
+  
+  // Initialize audio context and analyser
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.AudioContext) {
+      audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
+      analyserRef.current = audioContextRef.current.createAnalyser();
+      analyserRef.current.fftSize = 256;
+      const bufferLength = analyserRef.current.frequencyBinCount;
+      dataArrayRef.current = new Uint8Array(bufferLength);
+    }
+    
+    return () => {
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
+      }
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+      }
+    };
+  }, []);
+  
+  // Start or stop audio capture based on recording state
+  useEffect(() => {
+    if (!audioContextRef.current || !analyserRef.current) return;
+    
+    if (isRecording && !isPaused) {
+      // Start capturing audio
+      navigator.mediaDevices.getUserMedia({ audio: true })
+        .then(stream => {
+          sourceRef.current = audioContextRef.current.createMediaStreamSource(stream);
+          sourceRef.current.connect(analyserRef.current);
+          draw();
+        })
+        .catch(err => console.error("Error accessing microphone:", err));
+    } else {
+      // Stop capturing audio
+      if (sourceRef.current) {
+        sourceRef.current.disconnect();
+        sourceRef.current = null;
+      }
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+      }
+      
+      // If paused, draw a static visualization
+      if (isPaused && canvasRef.current) {
+        drawPausedState();
+      }
+    }
+    
+    return () => {
+      if (sourceRef.current) {
+        sourceRef.current.disconnect();
+      }
+    };
+  }, [isRecording, isPaused]);
+  
+  // Draw function for visualization
+  const draw = () => {
+    if (!canvasRef.current || !analyserRef.current || !dataArrayRef.current) return;
+    
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    const width = canvas.width;
+    const height = canvas.height;
+    
+    // Clear canvas
+    ctx.clearRect(0, 0, width, height);
+    
+    // Get audio data
+    analyserRef.current.getByteFrequencyData(dataArrayRef.current);
+    
+    // Draw visualization
+    const centerX = width / 2;
+    const centerY = height / 2;
+    const radius = Math.min(centerX, centerY) * 0.7;
+    
+    // Draw circular waveform
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+    ctx.strokeStyle = '#2563eb20';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    
+    // Draw dynamic particles
+    const bufferLength = analyserRef.current.frequencyBinCount;
+    const angleStep = (2 * Math.PI) / bufferLength;
+    
+    for (let i = 0; i < bufferLength; i++) {
+      const value = dataArrayRef.current[i];
+      const amplitude = value / 255;
+      
+      // Calculate position
+      const angle = i * angleStep;
+      const particleRadius = radius * (0.8 + amplitude * 0.5);
+      const x = centerX + particleRadius * Math.cos(angle);
+      const y = centerY + particleRadius * Math.sin(angle);
+      
+      // Draw particle
+      ctx.beginPath();
+      ctx.arc(x, y, 2 + amplitude * 3, 0, 2 * Math.PI);
+      ctx.fillStyle = `rgba(37, 99, 235, ${0.3 + amplitude * 0.7})`;
+      ctx.fill();
+      
+      // Draw connecting line
+      if (i % 4 === 0) {
+        ctx.beginPath();
+        ctx.moveTo(centerX, centerY);
+        ctx.lineTo(x, y);
+        ctx.strokeStyle = `rgba(37, 99, 235, ${0.1 + amplitude * 0.2})`;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+    }
+    
+    // Draw pulsing center
+    const pulseSize = 20 + Math.sin(Date.now() / 500) * 5;
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, pulseSize, 0, 2 * Math.PI);
+    ctx.fillStyle = 'rgba(37, 99, 235, 0.5)';
+    ctx.fill();
+    
+    // Continue animation
+    animationRef.current = requestAnimationFrame(draw);
+  };
+  
+  // Draw a static visualization when paused
+  const drawPausedState = () => {
+    if (!canvasRef.current) return;
+    
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    const width = canvas.width;
+    const height = canvas.height;
+    
+    // Clear canvas
+    ctx.clearRect(0, 0, width, height);
+    
+    const centerX = width / 2;
+    const centerY = height / 2;
+    const radius = Math.min(centerX, centerY) * 0.7;
+    
+    // Draw circular outline
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+    ctx.strokeStyle = '#2563eb40';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    
+    // Draw pause symbol
+    ctx.beginPath();
+    ctx.fillStyle = '#2563eb80';
+    ctx.fillRect(centerX - 15, centerY - 15, 10, 30);
+    ctx.fillRect(centerX + 5, centerY - 15, 10, 30);
+  };
+  
+  // Draw initial state
+  useEffect(() => {
+    if (!canvasRef.current) return;
+    
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    const width = canvas.width;
+    const height = canvas.height;
+    
+    // Clear canvas
+    ctx.clearRect(0, 0, width, height);
+    
+    const centerX = width / 2;
+    const centerY = height / 2;
+    const radius = Math.min(centerX, centerY) * 0.7;
+    
+    // Draw circular outline
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+    ctx.strokeStyle = '#2563eb20';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    
+    // Draw microphone icon
+    if (!isRecording) {
+      ctx.beginPath();
+      ctx.fillStyle = '#2563eb40';
+      
+      // Simplified microphone shape
+      const micWidth = 20;
+      const micHeight = 30;
+      
+      // Mic body
+      ctx.roundRect(centerX - micWidth/2, centerY - micHeight/2, micWidth, micHeight, 5);
+      
+      // Mic stand
+      ctx.rect(centerX - 1, centerY + micHeight/2, 2, 10);
+      
+      // Mic base
+      ctx.roundRect(centerX - 10, centerY + micHeight/2 + 10, 20, 4, 2);
+      
+      ctx.fill();
+    }
+  }, [isRecording, isPaused]);
+  
+  return canvasRef;
+}
+
 /**
  * Dictation Modal Component
  * Provides a modal interface for voice dictation with border beam effect
@@ -19,16 +231,21 @@ export default function DictationModal({ isOpen, onClose }) {
   const [showPatientSelector, setShowPatientSelector] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [recordingFinished, setRecordingFinished] = useState(false);
+  const [showTranscriptPreview, setShowTranscriptPreview] = useState(true);
   
   // Data states
   const [selectedTemplate, setSelectedTemplate] = useState("soap");
   const [selectedPatient, setSelectedPatient] = useState(null);
   const [noteTitle, setNoteTitle] = useState("");
   
+  // Audio visualization
+  const visualizationCanvasRef = useAudioVisualization(isRecording, isPaused);
+  
   // Refs
   const timerRef = useRef(null);
   const recognitionRef = useRef(null);
   const modalRef = useRef(null);
+  const transcriptRef = useRef(""); // Ref to track transcript without dependency issues
   
   // Sample templates
   const templates = [
@@ -62,49 +279,110 @@ export default function DictationModal({ isOpen, onClose }) {
     };
   }, [isOpen, onClose, isRecording]);
 
-  // Initialize speech recognition when component mounts
+  // Sync transcript state with ref when it changes
   useEffect(() => {
-    if (typeof window !== 'undefined' && 'webkitSpeechRecognition' in window) {
-      // Using the Web Speech API (currently with webkit prefix in most browsers)
-      const SpeechRecognition = window.webkitSpeechRecognition;
-      recognitionRef.current = new SpeechRecognition();
-      recognitionRef.current.continuous = true;
-      recognitionRef.current.interimResults = true;
-      recognitionRef.current.lang = 'en-US';
-      
-      recognitionRef.current.onresult = (event) => {
-        let interimTranscript = '';
-        let finalTranscript = transcript;
-        
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          if (event.results[i].isFinal) {
-            finalTranscript += event.results[i][0].transcript;
-          } else {
-            interimTranscript += event.results[i][0].transcript;
-          }
-        }
-        
-        setTranscript(finalTranscript + interimTranscript);
-      };
-      
-      recognitionRef.current.onerror = (event) => {
-        console.error('Speech recognition error', event.error);
-      };
+    // When transcript state changes, update our ref
+    // This ensures our ref always has the latest state value
+    transcriptRef.current = transcript;
+  }, [transcript]);
+  
+  // Initialize speech recognition only once when component mounts
+  useEffect(() => {
+    // Check if browser supports speech recognition
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    
+    if (!SpeechRecognition) {
+      console.error("Speech recognition not supported in this browser");
+      return;
     }
     
+    // Initialize speech recognition
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+    recognitionRef.current = recognition;
+    
+    // Handle transcription results
+    recognitionRef.current.onresult = (event) => {
+      let interimTranscript = '';
+      let finalTranscript = transcriptRef.current; // Use our component-level ref
+      
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        if (event.results[i].isFinal) {
+          finalTranscript += event.results[i][0].transcript;
+        } else {
+          interimTranscript += event.results[i][0].transcript;
+        }
+      }
+      
+      // Update the transcript state and our ref
+      const newTranscript = finalTranscript + interimTranscript;
+      transcriptRef.current = finalTranscript; // Store only final parts in our ref
+      
+      // Update the state to trigger re-render with latest transcript
+      setTranscript(newTranscript);
+      
+      // Log for debugging
+      console.log("Transcript updated:", newTranscript);
+    };
+    
+    // Handle recognition errors
+    recognitionRef.current.onerror = (event) => {
+      console.error("Speech recognition error", event.error);
+      
+      if (event.error === 'not-allowed') {
+        alert("Microphone access is required for dictation. Please allow microphone access and try again.");
+        setIsRecording(false);
+      }
+    };
+    
+    // Handle recognition end
+    recognitionRef.current.onend = () => {
+      console.log("Speech recognition ended");
+      
+      // If we're still supposed to be recording, restart recognition
+      if (isRecording && !isPaused) {
+        console.log("Recognition ended unexpectedly. Restarting...");
+        
+        // Small delay before restarting to ensure clean restart
+        setTimeout(() => {
+          try {
+            // Preserve the current transcript in our ref before restarting
+            const currentText = transcriptRef.current;
+            console.log("Current transcript before restart:", currentText);
+            
+            // Start recognition again
+            recognitionRef.current.start();
+            console.log("Recognition restarted successfully");
+          } catch (error) {
+            console.error("Error restarting recognition:", error);
+            // If we can't restart, at least update the UI
+            if (error.name !== 'InvalidStateError') { // If it's already running, that's fine
+              setIsRecording(false);
+            }
+          }
+        }, 100); // Small delay to ensure clean restart
+      }
+    };
+    
     return () => {
-      // Clean up timer and recognition on unmount
+      // Clean up on unmount only
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch (e) {
+          // Ignore errors when stopping (might not be active)
+        }
+      }
+      
       if (timerRef.current) {
         clearInterval(timerRef.current);
       }
-      
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
-      }
     };
-  }, [transcript]);
+  }, []); // Empty dependency array - only run once on mount
 
-  // Start recording function
+  // Start recording function with error handling and retry mechanism
   const startRecording = () => {
     if (!recognitionRef.current) {
       alert("Speech recognition is not supported in your browser. Please try Chrome, Edge, or Safari.");
@@ -115,59 +393,140 @@ export default function DictationModal({ isOpen, onClose }) {
     setIsPaused(false);
     
     // Start the timer
+    if (timerRef.current) {
+      clearInterval(timerRef.current); // Clear any existing timer
+    }
+    
     timerRef.current = setInterval(() => {
       setRecordingTime(prev => prev + 1);
     }, 1000);
     
-    // Start speech recognition
-    recognitionRef.current.start();
+    // Start speech recognition with error handling
+    try {
+      recognitionRef.current.start();
+      console.log("Speech recognition started");
+    } catch (error) {
+      // Handle the case where recognition is already started
+      if (error.name === 'InvalidStateError') {
+        console.log("Recognition was already running, stopping and restarting");
+        try {
+          recognitionRef.current.stop();
+          // Small delay to ensure stop completes before starting again
+          setTimeout(() => {
+            recognitionRef.current.start();
+          }, 100);
+        } catch (e) {
+          console.error("Failed to restart recognition:", e);
+          alert("There was an issue with the speech recognition. Please try again.");
+          setIsRecording(false);
+        }
+      } else {
+        console.error("Error starting speech recognition:", error);
+        alert("There was an issue starting the speech recognition. Please try again.");
+        setIsRecording(false);
+      }
+    }
   };
   
-  // Pause recording function
+  // Pause recording function with improved error handling
   const pauseRecording = () => {
     setIsPaused(true);
     
     // Pause the timer
-    clearInterval(timerRef.current);
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
     
-    // Pause speech recognition
-    recognitionRef.current.stop();
+    // Pause speech recognition with error handling
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+        console.log("Speech recognition paused");
+      } catch (error) {
+        console.error("Error pausing speech recognition:", error);
+        // Even if there's an error, we still want the UI to show as paused
+      }
+    }
   };
   
-  // Resume recording function
+  // Resume recording function with improved error handling
   const resumeRecording = () => {
     setIsPaused(false);
     
     // Resume the timer
+    if (timerRef.current) {
+      clearInterval(timerRef.current); // Clear any existing timer
+    }
+    
     timerRef.current = setInterval(() => {
       setRecordingTime(prev => prev + 1);
     }, 1000);
     
-    // Resume speech recognition
-    recognitionRef.current.start();
+    // Resume speech recognition with error handling
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.start();
+        console.log("Speech recognition resumed");
+      } catch (error) {
+        console.error("Error resuming speech recognition:", error);
+        
+        // If it fails because it's already running, that's actually fine
+        if (error.name !== 'InvalidStateError') {
+          alert("There was an issue resuming the recording. Please try again.");
+          setIsPaused(true);
+          clearInterval(timerRef.current);
+        }
+      }
+    }
   };
   
-  // Stop recording function
+  // Stop recording function with improved error handling and transcript processing
   const stopRecording = () => {
+    // Update UI state immediately for better responsiveness
     setIsRecording(false);
     setIsPaused(false);
     
     // Stop the timer
-    clearInterval(timerRef.current);
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
     
-    // Stop speech recognition
-    recognitionRef.current.stop();
+    // Stop speech recognition with error handling
+    if (recognitionRef.current) {
+      try {
+        // Ensure we get any final results before stopping
+        recognitionRef.current.stop();
+        console.log("Speech recognition stopped");
+      } catch (error) {
+        console.error("Error stopping speech recognition:", error);
+        // Continue with the stopping process even if there's an error
+      }
+    }
     
     // Process the transcript (in a real app, this would send to AI for SOAP note generation)
     console.log("Final transcript:", transcript);
     
+    // Clean up the transcript if needed (remove extra spaces, fix capitalization, etc.)
+    const cleanedTranscript = transcript.trim();
+    
+    // Only update if there are changes to avoid unnecessary re-renders
+    if (cleanedTranscript !== transcript) {
+      setTranscript(cleanedTranscript);
+    }
+    
     // Show save options
     setRecordingFinished(true);
     
-    // Generate a default title based on template and patient if selected
+    // Generate a smart default title based on template and patient if selected
+    const currentDate = new Date().toLocaleDateString();
     const patientName = selectedPatient ? selectedPatient.name : "";
     const templateName = templates.find(t => t.id === selectedTemplate)?.name || "Note";
-    setNoteTitle(`${patientName ? patientName + " - " : ""}${templateName} ${new Date().toLocaleDateString()}`);
+    
+    // Create a more descriptive title that includes date and time for better organization
+    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    setNoteTitle(`${patientName ? patientName + " - " : ""}${templateName} ${currentDate} ${timeStr}`);
   };
   
   // Save note function
@@ -196,29 +555,28 @@ export default function DictationModal({ isOpen, onClose }) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-shadow-900/70">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-100">
       <div 
         ref={modalRef}
-        className="relative bg-shadow-100 rounded-xl w-full max-w-md mx-4 overflow-hidden max-h-[90vh] overflow-y-auto"
+        className={`relative bg-white rounded-xl border border-gray-200 shadow-md w-full max-w-xl mx-4 overflow-hidden transition-all duration-300 ${isOpen ? 'scale-100 opacity-100' : 'scale-95 opacity-0'}`}
       >
         {/* Border Beam Effect */}
-        <div className="absolute inset-0 rounded-xl border border-royal/50 [background:linear-gradient(var(--royal),var(--royal))_padding-box,linear-gradient(to_right,#2563eb,transparent)_border-box] z-0 animate-pulse"></div>
+        <div className="absolute inset-0 rounded-xl border border-royal/30 [background:linear-gradient(white,white)_padding-box,linear-gradient(to_right,#2563eb,transparent)_border-box] z-0"></div>
         
         {/* Modal Content */}
-        <div className="relative z-10 p-6">
+        <div className="relative z-10 p-5">
           {/* Header */}
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-heading">
-              {recordingFinished ? "Save Recording" : "Voice Dictation"}
+            <h2 className="text-xl font-semibold flex items-center">
+              <Mic size={20} className="mr-2 text-royal" />
+              Voice Dictation
             </h2>
-            {(!isRecording && !recordingFinished) && (
-              <button 
-                onClick={onClose}
-                className="p-1 rounded-full hover:bg-shadow-200 transition-colors"
-              >
-                <X size={20} />
-              </button>
-            )}
+            <button 
+              onClick={onClose}
+              className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+            >
+              <X size={18} className="text-gray-500" />
+            </button>
           </div>
           
           {/* Pre-recording options */}
@@ -227,7 +585,7 @@ export default function DictationModal({ isOpen, onClose }) {
               {/* Template Selector */}
               <div>
                 <div 
-                  className="flex items-center justify-between p-3 bg-shadow-200 rounded-lg cursor-pointer"
+                  className="flex items-center justify-between p-3 bg-gray-100 rounded-lg cursor-pointer"
                   onClick={() => setShowTemplateSelector(!showTemplateSelector)}
                 >
                   <div className="flex items-center">
@@ -238,11 +596,11 @@ export default function DictationModal({ isOpen, onClose }) {
                 </div>
                 
                 {showTemplateSelector && (
-                  <div className="mt-2 border border-shadow-200 rounded-lg overflow-hidden">
+                  <div className="mt-2 border border-gray-200 rounded-lg overflow-hidden">
                     {templates.map(template => (
                       <div 
                         key={template.id}
-                        className={`p-3 cursor-pointer hover:bg-shadow-200 ${selectedTemplate === template.id ? 'bg-shadow-200' : ''}`}
+                        className={`p-3 cursor-pointer hover:bg-gray-100 ${selectedTemplate === template.id ? 'bg-gray-100' : ''}`}
                         onClick={() => {
                           setSelectedTemplate(template.id);
                           setShowTemplateSelector(false);
@@ -252,7 +610,7 @@ export default function DictationModal({ isOpen, onClose }) {
                           <span className="font-medium">{template.name}</span>
                           {selectedTemplate === template.id && <Check size={16} className="text-royal" />}
                         </div>
-                        <p className="text-sm text-white/60 mt-1">{template.description}</p>
+                        <p className="text-sm text-gray-500 mt-1">{template.description}</p>
                       </div>
                     ))}
                   </div>
@@ -262,7 +620,7 @@ export default function DictationModal({ isOpen, onClose }) {
               {/* Patient Selector */}
               <div>
                 <div 
-                  className="flex items-center justify-between p-3 bg-shadow-200 rounded-lg cursor-pointer"
+                  className="flex items-center justify-between p-3 bg-gray-100 rounded-lg cursor-pointer"
                   onClick={() => setShowPatientSelector(!showPatientSelector)}
                 >
                   <div className="flex items-center">
@@ -275,24 +633,24 @@ export default function DictationModal({ isOpen, onClose }) {
                 </div>
                 
                 {showPatientSelector && (
-                  <div className="mt-2 border border-shadow-200 rounded-lg overflow-hidden">
+                  <div className="mt-2 border border-gray-200 rounded-lg overflow-hidden">
                     {/* Option to clear selection */}
                     {selectedPatient && (
                       <div 
-                        className="p-3 cursor-pointer hover:bg-shadow-200 border-b border-shadow-200"
+                        className="p-3 cursor-pointer hover:bg-gray-100 border-b border-gray-200"
                         onClick={() => {
                           setSelectedPatient(null);
                           setShowPatientSelector(false);
                         }}
                       >
-                        <span className="text-white/70">No patient (clear selection)</span>
+                        <span className="text-gray-500">No patient (clear selection)</span>
                       </div>
                     )}
                     
                     {patients.map(patient => (
                       <div 
                         key={patient.id}
-                        className={`p-3 cursor-pointer hover:bg-shadow-200 ${selectedPatient?.id === patient.id ? 'bg-shadow-200' : ''}`}
+                        className={`p-3 cursor-pointer hover:bg-gray-100 ${selectedPatient?.id === patient.id ? 'bg-gray-100' : ''}`}
                         onClick={() => {
                           setSelectedPatient(patient);
                           setShowPatientSelector(false);
@@ -302,7 +660,7 @@ export default function DictationModal({ isOpen, onClose }) {
                           <span className="font-medium">{patient.name}</span>
                           {selectedPatient?.id === patient.id && <Check size={16} className="text-royal" />}
                         </div>
-                        <p className="text-sm text-white/60 mt-1">DOB: {new Date(patient.dob).toLocaleDateString()}</p>
+                        <p className="text-sm text-gray-500 mt-1">DOB: {new Date(patient.dob).toLocaleDateString()}</p>
                       </div>
                     ))}
                   </div>
@@ -312,7 +670,7 @@ export default function DictationModal({ isOpen, onClose }) {
               {/* Settings */}
               <div>
                 <div 
-                  className="flex items-center justify-between p-3 bg-shadow-200 rounded-lg cursor-pointer"
+                  className="flex items-center justify-between p-3 bg-gray-100 rounded-lg cursor-pointer"
                   onClick={() => setShowSettings(!showSettings)}
                 >
                   <div className="flex items-center">
@@ -323,10 +681,10 @@ export default function DictationModal({ isOpen, onClose }) {
                 </div>
                 
                 {showSettings && (
-                  <div className="mt-2 p-3 border border-shadow-200 rounded-lg">
+                  <div className="mt-2 p-3 border border-gray-200 rounded-lg">
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-sm">Language</span>
-                      <select className="bg-shadow-300 border border-shadow-400 rounded px-2 py-1 text-sm">
+                      <select className="bg-gray-100 border border-gray-200 rounded px-2 py-1 text-sm">
                         <option value="en-US">English (US)</option>
                         <option value="en-GB">English (UK)</option>
                         <option value="es-ES">Spanish</option>
@@ -335,7 +693,7 @@ export default function DictationModal({ isOpen, onClose }) {
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-sm">Auto-pause after silence</span>
-                      <select className="bg-shadow-300 border border-shadow-400 rounded px-2 py-1 text-sm">
+                      <select className="bg-gray-100 border border-gray-200 rounded px-2 py-1 text-sm">
                         <option value="0">Disabled</option>
                         <option value="5">5 seconds</option>
                         <option value="10">10 seconds</option>
@@ -349,12 +707,12 @@ export default function DictationModal({ isOpen, onClose }) {
           )}
           
           {/* Recording Status */}
-          {!recordingFinished && (
-            <div className="mb-6 text-center">
+          {(isRecording || recordingFinished) && (
+            <div className="mb-4 text-center">
               <div className="text-3xl font-medium mb-2">
                 {formatTime(recordingTime)}
               </div>
-              <div className="text-white/70">
+              <div className="text-gray-500">
                 {isRecording 
                   ? (isPaused ? "Paused" : "Recording...") 
                   : "Ready to record"}
@@ -362,36 +720,131 @@ export default function DictationModal({ isOpen, onClose }) {
             </div>
           )}
           
+          {/* Visualization Area */}
+          {(isRecording || recordingFinished) && (
+            <div className="mb-6">
+              <div className="flex flex-col items-center justify-center">
+                {/* Visualization Canvas */}
+                <div className="mt-4 relative">
+                  <div 
+                    className="w-40 h-40 md:w-48 md:h-48 rounded-full border-4 border-royal/20 flex items-center justify-center relative"
+                  >
+                    <canvas 
+                      ref={visualizationCanvasRef} 
+                      width="200" 
+                      height="200" 
+                      className="absolute inset-0"
+                    ></canvas>
+                    
+                    {/* Center dot */}
+                    <div className={`w-4 h-4 rounded-full ${isRecording && !isPaused ? 'bg-red-500 animate-pulse' : 'bg-gray-300'}`}></div>
+                    
+                    {/* Recording indicator */}
+                    {isRecording && !isPaused && (
+                      <div className="absolute top-2 right-2 flex items-center">
+                        <div className="w-3 h-3 rounded-full bg-red-500 mr-1 animate-pulse"></div>
+                        <span className="text-xs text-gray-500">REC</span>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Transcript Preview Toggle */}
+                  {isRecording && (
+                    <div className="flex items-center justify-center">
+                      <button 
+                        onClick={() => setShowTranscriptPreview(!showTranscriptPreview)}
+                        className="text-xs text-gray-500 hover:text-gray-700 transition-colors flex items-center"
+                      >
+                        {showTranscriptPreview ? "Hide" : "Show"} live transcription
+                        <ChevronDown 
+                          size={14} 
+                          className={`ml-1 transition-transform ${showTranscriptPreview ? 'rotate-180' : ''}`} 
+                        />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+          
           {/* Live Transcription Preview */}
-          {isRecording && transcript && (
-            <div className="mb-6 p-4 rounded-lg border border-shadow-200 bg-shadow-50 max-h-40 overflow-y-auto">
-              <h3 className="text-sm font-medium text-white/70 mb-2">Live Transcription</h3>
-              <p>{transcript || "Listening..."}</p>
+          {isRecording && transcript && showTranscriptPreview && (
+            <div className="mb-6 p-4 rounded-lg border border-gray-200 bg-gray-50 max-h-32 overflow-y-auto">
+              <h3 className="text-sm font-medium text-gray-700 mb-2">Live Transcription</h3>
+              <p className="text-sm">{transcript || "Listening..."}</p>
             </div>
           )}
           
           {/* Save Options (after recording) */}
           {recordingFinished && (
             <div className="mb-6 space-y-4">
-              {/* Title Input */}
+              {/* Note Type Selector */}
               <div>
-                <label className="block text-sm font-medium text-white/70 mb-1">Note Title</label>
-                <input 
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-sm font-medium text-gray-700">Note Type</label>
+                  <button className="flex items-center text-xs text-royal">
+                    <Settings size={12} className="mr-1" />
+                    Settings
+                  </button>
+                </div>
+                <div className="relative">
+                  <select 
+                    value={selectedTemplate}
+                    onChange={(e) => setSelectedTemplate(e.target.value)}
+                    className="block w-full pl-3 pr-10 py-2 text-base border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-royal focus:border-royal"
+                  >
+                    <option value="SOAP">SOAP Note</option>
+                    <option value="Progress">Progress Note</option>
+                    <option value="Consultation">Consultation</option>
+                    <option value="Procedure">Procedure Note</option>
+                    <option value="Discharge">Discharge Summary</option>
+                  </select>
+                  <div className="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none">
+                    <ChevronDown size={16} className="text-gray-500" />
+                  </div>
+                </div>
+              </div>
+              
+              {/* Patient Selector */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Patient</label>
+                <div className="relative">
+                  <select 
+                    value={selectedPatient}
+                    onChange={(e) => setSelectedPatient(e.target.value)}
+                    className="block w-full pl-3 pr-10 py-2 text-base border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-royal focus:border-royal"
+                  >
+                    <option value="">Select a patient</option>
+                    <option value="1">John Doe</option>
+                    <option value="2">Jane Smith</option>
+                    <option value="3">Robert Johnson</option>
+                  </select>
+                  <div className="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none">
+                    <ChevronDown size={16} className="text-gray-500" />
+                  </div>
+                </div>
+              </div>
+              
+              {/* Note Title */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Note Title</label>
+                <input
                   type="text"
                   value={noteTitle}
                   onChange={(e) => setNoteTitle(e.target.value)}
-                  className="w-full p-2 bg-shadow-200 border border-shadow-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-royal"
-                  placeholder="Enter note title"
+                  placeholder="Enter a title for your note"
+                  className="block w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-royal focus:border-royal"
                 />
               </div>
               
-              {/* Transcript Preview */}
+              {/* Transcript */}
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="block text-sm font-medium text-white/70">Transcript</label>
-                  <span className="text-xs text-white/50">{formatTime(recordingTime)} recorded</span>
+                  <label className="block text-sm font-medium text-gray-700">Transcript</label>
+                  <span className="text-xs text-gray-500">{formatTime(recordingTime)} recorded</span>
                 </div>
-                <div className="p-3 bg-shadow-50 border border-shadow-200 rounded-lg max-h-40 overflow-y-auto">
+                <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg max-h-40 overflow-y-auto">
                   <p className="whitespace-pre-wrap">{transcript || "No transcription available."}</p>
                 </div>
               </div>
@@ -400,7 +853,7 @@ export default function DictationModal({ isOpen, onClose }) {
               <div className="flex items-center justify-between pt-2">
                 <button
                   onClick={onClose}
-                  className="px-4 py-2 border border-shadow-300 rounded-lg hover:bg-shadow-200 transition-colors"
+                  className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors text-gray-700"
                 >
                   Cancel
                 </button>
@@ -412,14 +865,14 @@ export default function DictationModal({ isOpen, onClose }) {
                       setTranscript("");
                       setRecordingTime(0);
                     }}
-                    className="px-4 py-2 border border-shadow-300 rounded-lg hover:bg-shadow-200 transition-colors"
+                    className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors text-gray-700"
                   >
                     Discard & Re-record
                   </button>
                   
                   <button
                     onClick={saveNote}
-                    className="px-4 py-2 bg-royal hover:bg-royal-700 rounded-lg transition-colors flex items-center"
+                    className="px-4 py-2 bg-royal hover:bg-royal-700 rounded-lg transition-colors flex items-center text-white"
                   >
                     <Save size={16} className="mr-1" />
                     Save
@@ -453,7 +906,7 @@ export default function DictationModal({ isOpen, onClose }) {
                   ) : (
                     <button
                       onClick={pauseRecording}
-                      className="flex items-center justify-center w-12 h-12 bg-shadow-300 hover:bg-shadow-400 text-white rounded-full shadow-md transition-colors"
+                      className="flex items-center justify-center w-12 h-12 bg-gray-300 hover:bg-gray-400 text-white rounded-full shadow-md transition-colors"
                     >
                       <Pause size={20} />
                     </button>
@@ -472,7 +925,7 @@ export default function DictationModal({ isOpen, onClose }) {
           
           {/* Help Text */}
           {!isRecording && !recordingFinished && (
-            <div className="mt-6 text-center text-white/60 text-sm">
+            <div className="mt-6 text-center text-gray-500 text-sm">
               <p>Click the microphone button to start recording your note.</p>
               <p className="mt-1">Your voice will be transcribed in real-time.</p>
             </div>

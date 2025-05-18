@@ -77,12 +77,12 @@ module.exports = {
   		},
   		fontFamily: {
   			sans: [
-  				'var(--font-plus-jakarta)',
+  				'var(--font-roboto)',
   				'system-ui',
   				'sans-serif'
   			],
   			heading: [
-  				'Cal Sans',
+  				'var(--font-roboto)',
   				'system-ui',
   				'sans-serif'
   			]
@@ -95,4 +95,8 @@ module.exports = {
   	}
   },
   plugins: [require("tailwindcss-animate")],
+  // Add custom font classes
+  corePlugins: {
+    fontFamily: true,
+  },
 };

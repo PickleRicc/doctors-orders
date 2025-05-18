@@ -4,13 +4,13 @@
 
 @layer base {
   body {
-    font-family: var(--font-plus-jakarta), system-ui, sans-serif;
+    font-family: var(--font-roboto), system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
   
   h1, h2, h3, h4, h5, h6 {
-    font-family: 'Cal Sans', system-ui, sans-serif;
+    font-family: var(--font-roboto), system-ui, sans-serif;
   }
   :root {
     --background: 0 0% 100%;
@@ -88,6 +88,11 @@
     @apply max-w-7xl mx-auto px-4 sm:px-6 lg:px-8;
   }
   
+  /* Font utility classes */
+  .font-heading {
+    font-family: var(--font-roboto), system-ui, sans-serif;
+  }
+  
   /* Dashboard heading styles with reduced boldness */
   .dashboard h1 {
     @apply font-medium;
@@ -110,5 +115,8 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-heading;
   }
 }
