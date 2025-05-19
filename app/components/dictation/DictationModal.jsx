@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { X, Mic, Pause, Play, Square, Save, Check, ChevronDown, User, FileText, Settings } from "lucide-react";
+import { generateSoapNote, saveNote as saveNoteToBackend } from "../../services/transcriptionService";
 
 // Custom hook for audio visualization
 function useAudioVisualization(isRecording, isPaused) {
@@ -232,6 +233,7 @@ export default function DictationModal({ isOpen, onClose }) {
   const [showSettings, setShowSettings] = useState(false);
   const [recordingFinished, setRecordingFinished] = useState(false);
   const [showTranscriptPreview, setShowTranscriptPreview] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
   
   // Data states
   const [selectedTemplate, setSelectedTemplate] = useState("soap");
@@ -530,19 +532,36 @@ export default function DictationModal({ isOpen, onClose }) {
   };
   
   // Save note function
-  const saveNote = () => {
-    // In a real implementation, we would save the note to the backend
-    console.log("Saving note:", {
-      title: noteTitle,
-      patient: selectedPatient,
-      template: selectedTemplate,
-      transcript,
-      recordingTime,
-      timestamp: new Date().toISOString()
-    });
-    
-    // Close the modal
-    onClose();
+  const saveNote = async () => {
+    try {
+      // Show loading state
+      setIsSaving(true);
+      
+      // Generate SOAP note from transcript using GCP
+      const soapData = await generateSoapNote(transcript, {
+        template: selectedTemplate,
+        patientInfo: selectedPatient
+      });
+      
+      // Save the complete note
+      await saveNoteToBackend({
+        title: noteTitle,
+        patient: selectedPatient,
+        template: selectedTemplate,
+        transcript,
+        recordingTime,
+        soapData,
+        timestamp: new Date().toISOString()
+      });
+      
+      // Close the modal
+      onClose();
+    } catch (error) {
+      console.error("Error saving note:", error);
+      alert("There was an error saving your note. Please try again.");
+    } finally {
+      setIsSaving(false);
+    }
   };
   
   // Format recording time as MM:SS
