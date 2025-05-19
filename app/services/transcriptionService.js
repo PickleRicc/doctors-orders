@@ -3,7 +3,8 @@
  * Handles communication with the backend for transcription and SOAP note generation
  */
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
+// Update to use port 3000 to match our API routes
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api';
 
 /**
  * Generate a SOAP note from a transcript using GCP Natural Language API
@@ -181,13 +182,31 @@ async function blobToBase64(blob) {
 
 // Helper function to get auth token from Supabase
 async function getAuthToken() {
-  // This would typically come from your auth provider (Supabase in this case)
-  // For now, we'll use a placeholder that should be replaced with actual implementation
-  
-  // Example with Supabase:
-  // const { data: { session } } = await supabase.auth.getSession();
-  // return session?.access_token;
-  
-  // Placeholder - replace with actual implementation
-  return localStorage.getItem('supabase.auth.token');
+  try {
+    // For development, we can use a mock token
+    if (process.env.NODE_ENV === 'development') {
+      return localStorage.getItem('supabase.auth.token') || 'dev-token';
+    }
+    
+    // In production, get the actual token from Supabase
+    // Import is inside the function to avoid SSR issues
+    const { createClientComponentClient } = await import('@supabase/auth-helpers-nextjs');
+    const supabase = createClientComponentClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    if (!session) {
+      throw new Error('No active session');
+    }
+    
+    return session.access_token;
+  } catch (error) {
+    console.error('Error getting auth token:', error);
+    
+    // In development, fall back to a mock token
+    if (process.env.NODE_ENV === 'development') {
+      return 'dev-token';
+    }
+    
+    throw error;
+  }
 }

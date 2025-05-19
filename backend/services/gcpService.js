@@ -178,47 +178,98 @@ class GcpService {
    */
   async generateSoapNote(transcription, options = {}) {
     try {
+      console.log('Starting SOAP note generation with options:', JSON.stringify(options));
+      
       // First, analyze the text with Natural Language API to extract entities
-      const analysis = await this.analyzeText(transcription);
+      console.log('Analyzing text with Natural Language API...');
+      let analysis;
+      try {
+        analysis = await this.analyzeText(transcription);
+        console.log('Text analysis successful');
+      } catch (analysisError) {
+        console.error('Error in text analysis step:', analysisError);
+        throw new Error(`Text analysis failed: ${analysisError.message}`);
+      }
       
       // Try to get a working Gemini model
-      const model = await this.getGeminiModel();
+      console.log('Getting Gemini model...');
+      let model;
+      try {
+        model = await this.getGeminiModel();
+        console.log('Successfully got Gemini model');
+      } catch (modelError) {
+        console.error('Error getting Gemini model:', modelError);
+        throw new Error(`Failed to get Gemini model: ${modelError.message}`);
+      }
       
       // If no model is available, fall back to basic analysis
       if (!model) {
+        console.error('No Gemini model available after successful call');
         throw new Error('No Gemini model available');
       }
       
       // Create a prompt for Gemini to generate a SOAP note
+      console.log('Creating prompt for Gemini...');
       const prompt = this.createSoapPrompt(transcription, analysis, options);
       
       // Call Gemini model to generate SOAP note using the updated API approach
-      const request = {
-        contents: [
-          {
-            role: "user",
-            parts: [{ text: prompt }]
-          }
-        ],
-      };
+      console.log('Calling Gemini model with prompt...');
+      let result;
+      try {
+        const request = {
+          contents: [
+            {
+              role: "user",
+              parts: [{ text: prompt }]
+            }
+          ],
+        };
+        
+        result = await model.generateContent(request);
+        console.log('Gemini model returned response successfully');
+      } catch (geminiError) {
+        console.error('Error calling Gemini API:', geminiError);
+        throw new Error(`Gemini API call failed: ${geminiError.message}`);
+      }
       
-      const result = await model.generateContent(request);
       const response = result.response;
       
       // Parse the response to extract structured SOAP note
-      const soapNote = this.parseSoapResponse(
-        response.candidates[0].content.parts[0].text, 
-        transcription, 
-        analysis
-      );
+      console.log('Parsing Gemini response...');
+      let soapNote;
+      try {
+        soapNote = this.parseSoapResponse(
+          response.candidates[0].content.parts[0].text, 
+          transcription, 
+          analysis
+        );
+        console.log('Successfully parsed SOAP response');
+      } catch (parseError) {
+        console.error('Error parsing Gemini response:', parseError);
+        throw new Error(`Failed to parse Gemini response: ${parseError.message}`);
+      }
       
+      console.log('SOAP note generation complete with generatedBy:', soapNote.generatedBy);
       return soapNote;
     } catch (error) {
       console.error('Error generating SOAP note:', error);
       
       // Fallback to basic analysis if Vertex AI fails
       console.log('Falling back to basic analysis for SOAP note generation');
-      const analysis = await this.analyzeText(transcription);
+      let analysis;
+      try {
+        analysis = await this.analyzeText(transcription);
+      } catch (fallbackError) {
+        console.error('Even fallback analysis failed:', fallbackError);
+        // Create an empty analysis object if everything fails
+        analysis = {
+          entities: [],
+          medicalEntities: [],
+          sentiment: {},
+          categories: [{ name: 'Health', confidence: 0.5 }],
+          language: 'en'
+        };
+      }
       
       // Create a basic SOAP structure
       return {
@@ -242,11 +293,12 @@ class GcpService {
   createSoapPrompt(transcription, analysis, options = {}) {
     const { template = 'soap', patientInfo = {} } = options;
     
-    // Extract patient info if available
-    const patientName = patientInfo.name || 'the patient';
-    const patientAge = patientInfo.age || '';
-    const patientGender = patientInfo.gender || '';
-    const patientDob = patientInfo.dob || '';
+    // Extract patient info if available - ensure patientInfo is an object
+    const safePatientInfo = patientInfo || {};
+    const patientName = safePatientInfo.name || 'the patient';
+    const patientAge = safePatientInfo.age || '';
+    const patientGender = safePatientInfo.gender || '';
+    const patientDob = safePatientInfo.dob || '';
     
     // Create patient context string
     const patientContext = patientName !== 'the patient' 

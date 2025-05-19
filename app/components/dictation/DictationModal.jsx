@@ -307,26 +307,32 @@ export default function DictationModal({ isOpen, onClose }) {
     
     // Handle transcription results
     recognitionRef.current.onresult = (event) => {
+      // Clear previous interim results to prevent duplication
       let interimTranscript = '';
-      let finalTranscript = transcriptRef.current; // Use our component-level ref
+      let finalTranscript = '';
       
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
+      // Get all final results from the current session
+      for (let i = 0; i < event.results.length; ++i) {
         if (event.results[i].isFinal) {
-          finalTranscript += event.results[i][0].transcript;
-        } else {
-          interimTranscript += event.results[i][0].transcript;
+          finalTranscript += event.results[i][0].transcript + ' ';
+        } else if (i >= event.resultIndex) {
+          // Only add interim results from the current result set
+          interimTranscript += event.results[i][0].transcript + ' ';
         }
       }
       
-      // Update the transcript state and our ref
-      const newTranscript = finalTranscript + interimTranscript;
-      transcriptRef.current = finalTranscript; // Store only final parts in our ref
+      // Store the final transcript in our ref
+      transcriptRef.current = finalTranscript.trim();
+      
+      // Combine final and interim for display
+      const newTranscript = (finalTranscript + interimTranscript).trim();
       
       // Update the state to trigger re-render with latest transcript
       setTranscript(newTranscript);
       
       // Log for debugging
-      console.log("Transcript updated:", newTranscript);
+      console.log("Transcript updated - Final:", finalTranscript.trim());
+      console.log("Transcript updated - Interim:", interimTranscript.trim());
     };
     
     // Handle recognition errors
@@ -507,11 +513,13 @@ export default function DictationModal({ isOpen, onClose }) {
       }
     }
     
-    // Process the transcript (in a real app, this would send to AI for SOAP note generation)
+    // Process the transcript
     console.log("Final transcript:", transcript);
     
-    // Clean up the transcript if needed (remove extra spaces, fix capitalization, etc.)
+    // Clean up the transcript (remove extra spaces, fix capitalization, etc.)
     const cleanedTranscript = transcript.trim();
+    
+    // We'll generate the SOAP note when saving, not here, to avoid unnecessary API calls
     
     // Only update if there are changes to avoid unnecessary re-renders
     if (cleanedTranscript !== transcript) {
@@ -537,14 +545,18 @@ export default function DictationModal({ isOpen, onClose }) {
       // Show loading state
       setIsSaving(true);
       
-      // Generate SOAP note from transcript using GCP
+      // Generate SOAP note from transcript using GCP via our API
+      console.log('Generating SOAP note from transcript...');
       const soapData = await generateSoapNote(transcript, {
         template: selectedTemplate,
         patientInfo: selectedPatient
       });
       
+      console.log('SOAP note generated successfully:', soapData);
+      
       // Save the complete note
-      await saveNoteToBackend({
+      console.log('Saving note to backend...');
+      const savedNote = await saveNoteToBackend({
         title: noteTitle,
         patient: selectedPatient,
         template: selectedTemplate,
@@ -554,14 +566,16 @@ export default function DictationModal({ isOpen, onClose }) {
         timestamp: new Date().toISOString()
       });
       
+      console.log('Note saved successfully:', savedNote);
+      
       // Close the modal
       onClose();
     } catch (error) {
       console.error("Error saving note:", error);
-      alert("There was an error saving your note. Please try again.");
+      alert(`There was an error saving your note: ${error.message}. Please try again.`);
     } finally {
       setIsSaving(false);
-    }
+    }  
   };
   
   // Format recording time as MM:SS
@@ -830,14 +844,24 @@ export default function DictationModal({ isOpen, onClose }) {
                 <label className="block text-sm font-medium text-gray-700 mb-1">Patient</label>
                 <div className="relative">
                   <select 
-                    value={selectedPatient}
-                    onChange={(e) => setSelectedPatient(e.target.value)}
+                    value={selectedPatient ? selectedPatient.id : ""}
+                    onChange={(e) => {
+                      const patientId = e.target.value;
+                      if (patientId === "") {
+                        setSelectedPatient(null);
+                      } else {
+                        const patient = patients.find(p => p.id === patientId);
+                        setSelectedPatient(patient || null);
+                      }
+                    }}
                     className="block w-full pl-3 pr-10 py-2 text-base border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-royal focus:border-royal"
                   >
                     <option value="">Select a patient</option>
-                    <option value="1">John Doe</option>
-                    <option value="2">Jane Smith</option>
-                    <option value="3">Robert Johnson</option>
+                    {patients.map(patient => (
+                      <option key={patient.id} value={patient.id}>
+                        {patient.name}
+                      </option>
+                    ))}
                   </select>
                   <div className="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none">
                     <ChevronDown size={16} className="text-gray-500" />
