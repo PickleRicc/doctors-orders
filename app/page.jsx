@@ -57,27 +57,63 @@ export default function LandingPage() {
               </Link>
             </div>
             
-            {/* Safari Browser Mockup */}
-            <div className="w-full max-w-6xl mx-auto flex justify-center py-8">
-              <div className="relative w-full max-w-4xl">
-                <Safari 
-                  url="app.doctorsorders.ai/create-note" 
-                  width={1200} 
-                  height={700} 
-                  mode="default"
-                />
-                {/* Placeholder for screenshot - will be replaced with actual app screenshot */}
-                <div className="absolute inset-[52px] bottom-[1px] flex items-center justify-center bg-shadow-100">
-                  <div className="text-center p-6">
-                    <MicIcon size={74} className="text-royal mb-4 mx-auto" />
-                    <h3 className="text-2xl md:text-3xl font-bold text-white">Voice-Powered Note Taking</h3>
-                    <p className="text-white/70 text-lg max-w-xl mt-2">Dictate your notes in real-time with AI-assisted SOAP formatting</p>
-                    <div className="mt-6 inline-block">
-                      <div className="px-4 py-1 bg-royal/20 border border-royal/30 rounded-md text-royal animate-pulse">
-                        Recording...
-                      </div>
-                    </div>
+            {/* App Screenshots Section */}
+            <div className="w-full max-w-6xl mx-auto py-12">
+              {/* Desktop View - Mobile and Desktop Screenshots */}
+              <div className="hidden md:flex items-center justify-center gap-10">
+                {/* Mobile Screenshot - Left Side */}
+                <div className="relative shadow-xl rounded-xl overflow-hidden border-2 border-royal/20 self-center">
+                  <div className="bg-shadow-50">
+                    <Image 
+                      src="/IMG_2376.jpeg" 
+                      alt="Doctor's Orders Mobile App Interface" 
+                      width={180}
+                      height={380}
+                      className="w-auto h-auto"
+                      priority
+                    />
                   </div>
+                </div>
+                
+                {/* Desktop Screenshot - Right Side */}
+                <div className="relative w-full max-w-3xl shadow-xl rounded-xl overflow-hidden border-2 border-royal/20">
+                  <div className="bg-white">
+                    <Image 
+                      src="/Screenshot Capture - 2025-05-19 - 15-08-47.png" 
+                      alt="Doctor's Orders Web App Interface" 
+                      width={800}
+                      height={500}
+                      className="w-full h-auto"
+                      priority
+                    />
+                  </div>
+                </div>
+              </div>
+              
+              {/* Mobile View - Stacked Screenshots */}
+              <div className="md:hidden space-y-8">
+                {/* Desktop Screenshot */}
+                <div className="relative mx-auto w-full max-w-sm shadow-xl rounded-xl overflow-hidden border-2 border-royal/20">
+                  <Image 
+                    src="/Screenshot Capture - 2025-05-19 - 15-08-47.png" 
+                    alt="Doctor's Orders Web App Interface" 
+                    width={400}
+                    height={250}
+                    className="w-full h-auto"
+                    priority
+                  />
+                </div>
+                
+                {/* Mobile Screenshot */}
+                <div className="relative mx-auto shadow-xl rounded-xl overflow-hidden border-2 border-royal/20 max-w-[200px]">
+                  <Image 
+                    src="/IMG_2376.jpeg" 
+                    alt="Doctor's Orders Mobile App Interface" 
+                    width={200}
+                    height={400}
+                    className="w-full h-auto"
+                    priority
+                  />
                 </div>
               </div>
             </div>
@@ -87,65 +123,38 @@ export default function LandingPage() {
 
       {/* Features Section */}
       <section id="features" className="py-24 px-4 bg-shadow-50">
-        <div className="container-content">
+        <div className="container-content max-w-6xl mx-auto">
           <div className="text-center mb-16">
             <h2 className="text-3xl md:text-4xl font-bold mb-4 text-white">Powerful <span className="text-royal">Features</span></h2>
             <p className="text-white/70 text-xl max-w-2xl mx-auto">Everything you need to streamline your medical documentation workflow</p>
           </div>
           
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-            <div className="lg:col-span-3">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                {/* Feature 1 */}
-                <div className="card p-6">
-                  <div className="rounded-full bg-shadow-200 w-12 h-12 flex items-center justify-center mb-4">
-                    <MicIcon className="text-royal" size={24} />
-                  </div>
-                  <h3 className="text-xl font-bold mb-2 text-white">Real-time Voice Dictation</h3>
-                  <p className="text-white/70">Speak naturally and see your words appear instantly, with smart pause detection and voice commands.</p>
-                </div>
-
-                {/* Feature 2 */}
-                <div className="card p-6">
-                  <div className="rounded-full bg-shadow-200 w-12 h-12 flex items-center justify-center mb-4">
-                    <SparklesIcon className="text-royal" size={24} />
-                  </div>
-                  <h3 className="text-xl font-bold mb-2 text-white">AI-Powered SOAP Structure</h3>
-                  <p className="text-white/70">Let artificial intelligence automatically organize your dictation into professional SOAP-formatted notes.</p>
-                </div>
-
-                {/* Feature 3 */}
-                <div className="card p-6">
-                  <div className="rounded-full bg-shadow-200 w-12 h-12 flex items-center justify-center mb-4">
-                    <ClipboardCheckIcon className="text-royal" size={24} />
-                  </div>
-                  <h3 className="text-xl font-bold mb-2 text-white">Smart Templates</h3>
-                  <p className="text-white/70">Choose from specialty-specific templates to streamline your workflow and ensure comprehensive documentation.</p>
-                </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-4xl mx-auto">
+            {/* Feature 1 */}
+            <div className="card p-6 bg-shadow-100/50 rounded-xl border border-shadow-200/30">
+              <div className="rounded-full bg-shadow-200 w-12 h-12 flex items-center justify-center mb-4">
+                <MicIcon className="text-royal" size={24} />
               </div>
+              <h3 className="text-xl font-bold mb-2 text-white">Real-time Voice Dictation</h3>
+              <p className="text-white/70">Speak naturally and see your words appear instantly, with smart pause detection and voice commands.</p>
             </div>
-            
-            {/* Mobile View */}
-            <div className="flex justify-center">
-              <div className="relative">
-                <Iphone15Pro 
-                  width={240} 
-                  height={500}
-                >
-                  {/* Placeholder for mobile app screenshot - will be replaced with actual mobile app screenshot */}
-                  <div className="absolute inset-0 flex items-center justify-center bg-shadow-100">
-                    <div className="text-center p-4">
-                      <MicIcon size={24} className="text-royal mb-2 mx-auto" />
-                      <h3 className="text-sm font-bold text-white">Voice Notes</h3>
-                      <div className="mt-2 inline-block">
-                        <div className="px-2 py-1 bg-royal/20 border border-royal/30 rounded-sm text-xs text-royal animate-pulse">
-                          Recording...
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </Iphone15Pro>
+
+            {/* Feature 2 */}
+            <div className="card p-6 bg-shadow-100/50 rounded-xl border border-shadow-200/30">
+              <div className="rounded-full bg-shadow-200 w-12 h-12 flex items-center justify-center mb-4">
+                <SparklesIcon className="text-royal" size={24} />
               </div>
+              <h3 className="text-xl font-bold mb-2 text-white">AI-Powered SOAP Structure</h3>
+              <p className="text-white/70">Let artificial intelligence automatically organize your dictation into professional SOAP-formatted notes.</p>
+            </div>
+
+            {/* Feature 3 */}
+            <div className="card p-6 bg-shadow-100/50 rounded-xl border border-shadow-200/30">
+              <div className="rounded-full bg-shadow-200 w-12 h-12 flex items-center justify-center mb-4">
+                <ClipboardCheckIcon className="text-royal" size={24} />
+              </div>
+              <h3 className="text-xl font-bold mb-2 text-white">Smart Templates</h3>
+              <p className="text-white/70">Choose from specialty-specific templates to streamline your workflow and ensure comprehensive documentation.</p>
             </div>
           </div>
 
