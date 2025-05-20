@@ -69,6 +69,7 @@ export async function saveNote(noteData) {
         title: noteData.title,
         patient: noteData.patient,
         template: noteData.template,
+        templateName: noteData.templateName || '', // Include template name for consistency
         transcript: noteData.transcript,
         recordingTime: noteData.recordingTime,
         soapData,
@@ -180,25 +181,114 @@ async function blobToBase64(blob) {
   });
 }
 
+/**
+ * Fetch templates from the database
+ * @param {Object} options - Query options (specialty, isActive)
+ * @returns {Promise<Array>} List of templates
+ */
+export async function getTemplates(options = {}) {
+  try {
+    // Build query string from options
+    const queryParams = new URLSearchParams();
+    if (options.specialty) queryParams.append('specialty', options.specialty);
+    if (options.isActive !== undefined) queryParams.append('isActive', options.isActive);
+    
+    const queryString = queryParams.toString();
+    const url = `${API_BASE_URL}/templates${queryString ? `?${queryString}` : ''}`;
+    
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${await getAuthToken()}`
+      }
+    });
+
+    const result = await response.json();
+    
+    if (!response.ok) {
+      throw new Error(result.error || 'Failed to fetch templates');
+    }
+    
+    return result.data;
+  } catch (error) {
+    console.error('Error fetching templates:', error);
+    throw error;
+  }
+}
+
+/**
+ * Create a new template
+ * @param {Object} templateData - Template data
+ * @returns {Promise<Object>} Created template
+ */
+export async function createTemplate(templateData) {
+  try {
+    const response = await fetch(`${API_BASE_URL}/templates`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${await getAuthToken()}`
+      },
+      body: JSON.stringify(templateData)
+    });
+
+    const result = await response.json();
+    
+    if (!response.ok) {
+      throw new Error(result.error || 'Failed to create template');
+    }
+    
+    return result.data;
+  } catch (error) {
+    console.error('Error creating template:', error);
+    throw error;
+  }
+}
+
 // Helper function to get auth token from Supabase
 async function getAuthToken() {
+  // For development, use a mock token
+  if (process.env.NODE_ENV === 'development') {
+    console.log('Development mode: Using mock auth token');
+    return 'dev-token';
+  }
+  
   try {
-    // For development, we can use a mock token
-    if (process.env.NODE_ENV === 'development') {
-      return localStorage.getItem('supabase.auth.token') || 'dev-token';
+    // In production, get the token from local storage
+    // This assumes the token is stored during login
+    const getTokenFromStorage = () => {
+      // Check different possible storage keys
+      const possibleKeys = [
+        'supabase.auth.token',
+        'sb-auth-token',
+        'supabase.auth.access_token'
+      ];
+      
+      for (const key of possibleKeys) {
+        const token = localStorage.getItem(key);
+        if (token) return token;
+      }
+      
+      // Try to get from session storage as well
+      for (const key of possibleKeys) {
+        const token = sessionStorage.getItem(key);
+        if (token) return token;
+      }
+      
+      return null;
+    };
+    
+    const token = getTokenFromStorage();
+    
+    if (token) {
+      return token;
     }
     
-    // In production, get the actual token from Supabase
-    // Import is inside the function to avoid SSR issues
-    const { createClientComponentClient } = await import('@supabase/auth-helpers-nextjs');
-    const supabase = createClientComponentClient();
-    const { data: { session } } = await supabase.auth.getSession();
-    
-    if (!session) {
-      throw new Error('No active session');
-    }
-    
-    return session.access_token;
+    // If no token is found, redirect to login
+    console.warn('No auth token found, redirecting to login');
+    window.location.href = '/login?redirectTo=' + encodeURIComponent(window.location.pathname);
+    return null;
   } catch (error) {
     console.error('Error getting auth token:', error);
     
@@ -207,6 +297,8 @@ async function getAuthToken() {
       return 'dev-token';
     }
     
+    // In production, redirect to login if there's an auth error
+    window.location.href = '/login?redirectTo=' + encodeURIComponent(window.location.pathname);
     throw error;
   }
 }

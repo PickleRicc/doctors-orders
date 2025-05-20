@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { X, Mic, Pause, Play, Square, Save, Check, ChevronDown, User, FileText, Settings } from "lucide-react";
-import { generateSoapNote, saveNote as saveNoteToBackend } from "../../services/transcriptionService";
+import { saveNote as saveNoteToBackend, getTemplates } from "../../services/transcriptionService";
 
 // Custom hook for audio visualization
 function useAudioVisualization(isRecording, isPaused) {
@@ -234,11 +234,16 @@ export default function DictationModal({ isOpen, onClose }) {
   const [recordingFinished, setRecordingFinished] = useState(false);
   const [showTranscriptPreview, setShowTranscriptPreview] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isLoadingTemplates, setIsLoadingTemplates] = useState(false);
   
   // Data states
-  const [selectedTemplate, setSelectedTemplate] = useState("soap");
+  const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [selectedPatient, setSelectedPatient] = useState(null);
   const [noteTitle, setNoteTitle] = useState("");
+  const [templates, setTemplates] = useState([]);
+  
+  // Derived state - get the selected template object
+  const selectedTemplateObj = templates.find(t => t.id === selectedTemplate) || null;
   
   // Audio visualization
   const visualizationCanvasRef = useAudioVisualization(isRecording, isPaused);
@@ -249,14 +254,6 @@ export default function DictationModal({ isOpen, onClose }) {
   const modalRef = useRef(null);
   const transcriptRef = useRef(""); // Ref to track transcript without dependency issues
   
-  // Sample templates
-  const templates = [
-    { id: "soap", name: "SOAP Note", description: "Standard SOAP format for medical documentation" },
-    { id: "followup", name: "Follow-up Visit", description: "Brief note for follow-up appointments" },
-    { id: "procedure", name: "Procedure Note", description: "Detailed documentation of medical procedures" },
-    { id: "physical", name: "Physical Exam", description: "Comprehensive physical examination template" }
-  ];
-  
   // Sample patients
   const patients = [
     { id: 1, name: "John Doe", dob: "1980-05-15" },
@@ -265,6 +262,60 @@ export default function DictationModal({ isOpen, onClose }) {
     { id: 4, name: "Emily Wilson", dob: "1965-09-30" }
   ];
 
+  // Fetch templates from database when component mounts
+  useEffect(() => {
+    async function fetchTemplates() {
+      if (!isOpen) return;
+      
+      setIsLoadingTemplates(true);
+      try {
+        const fetchedTemplates = await getTemplates({ isActive: true });
+        console.log('Fetched templates:', fetchedTemplates);
+        
+        if (fetchedTemplates && fetchedTemplates.length > 0) {
+          setTemplates(fetchedTemplates);
+          // Select the first template by default if none is selected
+          if (!selectedTemplate) {
+            setSelectedTemplate(fetchedTemplates[0].id);
+          }
+        } else {
+          console.warn('No templates found, using fallback');
+          // Fallback templates in case database is empty
+          const fallbackTemplates = [
+            { 
+              id: "default", 
+              name: "Default SOAP Note", 
+              description: "Standard SOAP format for medical documentation",
+              specialty: "General",
+              prompt_template: "Create a comprehensive SOAP note based on the following transcription: {{transcription}}"
+            }
+          ];
+          setTemplates(fallbackTemplates);
+          setSelectedTemplate(fallbackTemplates[0].id);
+        }
+      } catch (error) {
+        console.error('Error fetching templates:', error);
+        
+        // Use fallback templates if fetch fails
+        const fallbackTemplates = [
+          { 
+            id: "default", 
+            name: "Default SOAP Note", 
+            description: "Standard SOAP format for medical documentation",
+            specialty: "General",
+            prompt_template: "Create a comprehensive SOAP note based on the following transcription: {{transcription}}"
+          }
+        ];
+        setTemplates(fallbackTemplates);
+        setSelectedTemplate(fallbackTemplates[0].id);
+      } finally {
+        setIsLoadingTemplates(false);
+      }
+    }
+    
+    fetchTemplates();
+  }, [isOpen, selectedTemplate]);
+  
   // Handle click outside to close modal
   useEffect(() => {
     function handleClickOutside(event) {
@@ -519,8 +570,6 @@ export default function DictationModal({ isOpen, onClose }) {
     // Clean up the transcript (remove extra spaces, fix capitalization, etc.)
     const cleanedTranscript = transcript.trim();
     
-    // We'll generate the SOAP note when saving, not here, to avoid unnecessary API calls
-    
     // Only update if there are changes to avoid unnecessary re-renders
     if (cleanedTranscript !== transcript) {
       setTranscript(cleanedTranscript);
@@ -532,7 +581,7 @@ export default function DictationModal({ isOpen, onClose }) {
     // Generate a smart default title based on template and patient if selected
     const currentDate = new Date().toLocaleDateString();
     const patientName = selectedPatient ? selectedPatient.name : "";
-    const templateName = templates.find(t => t.id === selectedTemplate)?.name || "Note";
+    const templateName = selectedTemplateObj?.name || "Note";
     
     // Create a more descriptive title that includes date and time for better organization
     const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -545,24 +594,15 @@ export default function DictationModal({ isOpen, onClose }) {
       // Show loading state
       setIsSaving(true);
       
-      // Generate SOAP note from transcript using GCP via our API
-      console.log('Generating SOAP note from transcript...');
-      const soapData = await generateSoapNote(transcript, {
-        template: selectedTemplate,
-        patientInfo: selectedPatient
-      });
-      
-      console.log('SOAP note generated successfully:', soapData);
-      
       // Save the complete note
       console.log('Saving note to backend...');
       const savedNote = await saveNoteToBackend({
         title: noteTitle,
         patient: selectedPatient,
         template: selectedTemplate,
+        templateName: selectedTemplateObj?.name || 'Default Template',
         transcript,
         recordingTime,
-        soapData,
         timestamp: new Date().toISOString()
       });
       
@@ -591,13 +631,13 @@ export default function DictationModal({ isOpen, onClose }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-100">
       <div 
         ref={modalRef}
-        className={`relative bg-white rounded-xl border border-gray-200 shadow-md w-full max-w-xl mx-4 overflow-hidden transition-all duration-300 ${isOpen ? 'scale-100 opacity-100' : 'scale-95 opacity-0'}`}
+        className={`relative bg-white rounded-xl border border-gray-200 shadow-md w-full max-w-xl mx-4 overflow-hidden transition-all duration-300 ${isOpen ? 'scale-100 opacity-100' : 'scale-95 opacity-0'} max-h-[90vh]`}
       >
         {/* Border Beam Effect */}
         <div className="absolute inset-0 rounded-xl border border-royal/30 [background:linear-gradient(white,white)_padding-box,linear-gradient(to_right,#2563eb,transparent)_border-box] z-0"></div>
         
         {/* Modal Content */}
-        <div className="relative z-10 p-5">
+        <div className="relative z-10 p-5 overflow-y-auto">
           {/* Header */}
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-xl font-semibold flex items-center">
@@ -623,29 +663,48 @@ export default function DictationModal({ isOpen, onClose }) {
                 >
                   <div className="flex items-center">
                     <FileText size={18} className="mr-2 text-royal" />
-                    <span>Template: {templates.find(t => t.id === selectedTemplate)?.name}</span>
+                    <span>
+                      {isLoadingTemplates ? (
+                        "Loading templates..."
+                      ) : (
+                        `Template: ${templates.find(t => t.id === selectedTemplate)?.name || 'Select template'}`
+                      )}
+                    </span>
                   </div>
                   <ChevronDown size={18} className={`transition-transform ${showTemplateSelector ? 'rotate-180' : ''}`} />
                 </div>
                 
                 {showTemplateSelector && (
                   <div className="mt-2 border border-gray-200 rounded-lg overflow-hidden">
-                    {templates.map(template => (
-                      <div 
-                        key={template.id}
-                        className={`p-3 cursor-pointer hover:bg-gray-100 ${selectedTemplate === template.id ? 'bg-gray-100' : ''}`}
-                        onClick={() => {
-                          setSelectedTemplate(template.id);
-                          setShowTemplateSelector(false);
-                        }}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="font-medium">{template.name}</span>
-                          {selectedTemplate === template.id && <Check size={16} className="text-royal" />}
-                        </div>
-                        <p className="text-sm text-gray-500 mt-1">{template.description}</p>
+                    {isLoadingTemplates ? (
+                      <div className="p-3 text-center text-gray-500">
+                        Loading templates...
                       </div>
-                    ))}
+                    ) : templates.length === 0 ? (
+                      <div className="p-3 text-center text-gray-500">
+                        No templates available
+                      </div>
+                    ) : (
+                      templates.map(template => (
+                        <div 
+                          key={template.id}
+                          className={`p-3 cursor-pointer hover:bg-gray-100 ${selectedTemplate === template.id ? 'bg-gray-100' : ''}`}
+                          onClick={() => {
+                            setSelectedTemplate(template.id);
+                            setShowTemplateSelector(false);
+                          }}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-medium">{template.name}</span>
+                            {selectedTemplate === template.id && <Check size={16} className="text-royal" />}
+                          </div>
+                          <p className="text-sm text-gray-500 mt-1">{template.description || 'No description available'}</p>
+                          {template.specialty && (
+                            <p className="text-xs text-royal mt-1">Specialty: {template.specialty}</p>
+                          )}
+                        </div>
+                      ))
+                    )}
                   </div>
                 )}
               </div>
@@ -742,25 +801,25 @@ export default function DictationModal({ isOpen, onClose }) {
           {/* Recording Status */}
           {(isRecording || recordingFinished) && (
             <div className="mb-4 text-center">
-              <div className="text-3xl font-medium mb-2">
+              <div className={`font-medium mb-1 ${recordingFinished ? 'text-2xl' : 'text-3xl'}`}>
                 {formatTime(recordingTime)}
               </div>
-              <div className="text-gray-500">
+              <div className="text-gray-500 text-sm">
                 {isRecording 
                   ? (isPaused ? "Paused" : "Recording...") 
-                  : "Ready to record"}
+                  : "Recording complete"}
               </div>
             </div>
           )}
           
           {/* Visualization Area */}
           {(isRecording || recordingFinished) && (
-            <div className="mb-6">
+            <div className={`mb-4 ${recordingFinished ? 'hidden md:block' : 'block'}`}>
               <div className="flex flex-col items-center justify-center">
                 {/* Visualization Canvas */}
-                <div className="mt-4 relative">
+                <div className="mt-2 relative">
                   <div 
-                    className="w-40 h-40 md:w-48 md:h-48 rounded-full border-4 border-royal/20 flex items-center justify-center relative"
+                    className={`${recordingFinished ? 'w-32 h-32 md:w-40 md:h-40' : 'w-40 h-40 md:w-48 md:h-48'} rounded-full border-4 border-royal/20 flex items-center justify-center relative`}
                   >
                     <canvas 
                       ref={visualizationCanvasRef} 
@@ -803,68 +862,55 @@ export default function DictationModal({ isOpen, onClose }) {
           
           {/* Live Transcription Preview */}
           {isRecording && transcript && showTranscriptPreview && (
-            <div className="mb-6 p-4 rounded-lg border border-gray-200 bg-gray-50 max-h-32 overflow-y-auto">
-              <h3 className="text-sm font-medium text-gray-700 mb-2">Live Transcription</h3>
+            <div className="mb-4 p-3 rounded-lg border border-gray-200 bg-gray-50 max-h-28 overflow-y-auto">
+              <h3 className="text-xs font-medium text-gray-700 mb-1">Live Transcription</h3>
               <p className="text-sm">{transcript || "Listening..."}</p>
             </div>
           )}
           
           {/* Save Options (after recording) */}
           {recordingFinished && (
-            <div className="mb-6 space-y-4">
-              {/* Note Type Selector */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-sm font-medium text-gray-700">Note Type</label>
-                  <button className="flex items-center text-xs text-royal">
-                    <Settings size={12} className="mr-1" />
-                    Settings
-                  </button>
-                </div>
-                <div className="relative">
-                  <select 
-                    value={selectedTemplate}
-                    onChange={(e) => setSelectedTemplate(e.target.value)}
-                    className="block w-full pl-3 pr-10 py-2 text-base border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-royal focus:border-royal"
-                  >
-                    <option value="SOAP">SOAP Note</option>
-                    <option value="Progress">Progress Note</option>
-                    <option value="Consultation">Consultation</option>
-                    <option value="Procedure">Procedure Note</option>
-                    <option value="Discharge">Discharge Summary</option>
-                  </select>
-                  <div className="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none">
-                    <ChevronDown size={16} className="text-gray-500" />
+            <div className="mb-4 space-y-3">
+              <div className="md:grid md:grid-cols-2 md:gap-3 space-y-3 md:space-y-0">
+                {/* Note Type Display */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-sm font-medium text-gray-700">Template</label>
+                  </div>
+                  <div className="p-2 bg-gray-50 border border-gray-200 rounded-lg flex items-center">
+                    <FileText size={16} className="mr-2 text-royal flex-shrink-0" />
+                    <div className="overflow-hidden">
+                      <span className="text-gray-800 text-sm truncate block">
+                        {selectedTemplateObj?.name || templates.find(t => t.id === selectedTemplate)?.name || 'Default Template'}
+                      </span>
+                      {selectedTemplateObj?.specialty && (
+                        <span className="text-xs text-royal">
+                          {selectedTemplateObj.specialty}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-              
-              {/* Patient Selector */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Patient</label>
-                <div className="relative">
-                  <select 
-                    value={selectedPatient ? selectedPatient.id : ""}
-                    onChange={(e) => {
-                      const patientId = e.target.value;
-                      if (patientId === "") {
-                        setSelectedPatient(null);
-                      } else {
-                        const patient = patients.find(p => p.id === patientId);
-                        setSelectedPatient(patient || null);
-                      }
-                    }}
-                    className="block w-full pl-3 pr-10 py-2 text-base border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-royal focus:border-royal"
-                  >
-                    <option value="">Select a patient</option>
-                    {patients.map(patient => (
-                      <option key={patient.id} value={patient.id}>
-                        {patient.name}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none">
-                    <ChevronDown size={16} className="text-gray-500" />
+                
+                {/* Patient Display */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-sm font-medium text-gray-700">Patient</label>
+                  </div>
+                  <div className="p-2 bg-gray-50 border border-gray-200 rounded-lg flex items-center">
+                    <User size={16} className="mr-2 text-royal flex-shrink-0" />
+                    {selectedPatient ? (
+                      <div className="overflow-hidden">
+                        <span className="text-gray-800 text-sm truncate block">{selectedPatient.name}</span>
+                        {selectedPatient.dob && (
+                          <span className="text-xs text-gray-500">
+                            DOB: {new Date(selectedPatient.dob).toLocaleDateString()}
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-gray-500 text-sm">No patient selected</span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -887,8 +933,8 @@ export default function DictationModal({ isOpen, onClose }) {
                   <label className="block text-sm font-medium text-gray-700">Transcript</label>
                   <span className="text-xs text-gray-500">{formatTime(recordingTime)} recorded</span>
                 </div>
-                <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg max-h-40 overflow-y-auto">
-                  <p className="whitespace-pre-wrap">{transcript || "No transcription available."}</p>
+                <div className="p-2 bg-gray-50 border border-gray-200 rounded-lg max-h-32 overflow-y-auto">
+                  <p className="whitespace-pre-wrap text-sm">{transcript || "No transcription available."}</p>
                 </div>
               </div>
               
@@ -896,7 +942,7 @@ export default function DictationModal({ isOpen, onClose }) {
               <div className="flex items-center justify-between pt-2">
                 <button
                   onClick={onClose}
-                  className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors text-gray-700"
+                  className="px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors text-gray-700 text-sm"
                 >
                   Cancel
                 </button>
@@ -908,17 +954,27 @@ export default function DictationModal({ isOpen, onClose }) {
                       setTranscript("");
                       setRecordingTime(0);
                     }}
-                    className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors text-gray-700"
+                    className="px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors text-gray-700 text-sm"
                   >
-                    Discard & Re-record
+                    <span className="hidden sm:inline">Discard & </span>Re-record
                   </button>
                   
                   <button
                     onClick={saveNote}
-                    className="px-4 py-2 bg-royal hover:bg-royal-700 rounded-lg transition-colors flex items-center text-white"
+                    disabled={isSaving}
+                    className="px-4 py-2 bg-royal hover:bg-royal-700 rounded-lg transition-colors flex items-center text-white disabled:opacity-70 disabled:cursor-not-allowed"
                   >
-                    <Save size={16} className="mr-1" />
-                    Save
+                    {isSaving ? (
+                      <>
+                        <span className="mr-2 h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                        Saving...
+                      </>
+                    ) : (
+                      <>
+                        <Save size={16} className="mr-1" />
+                        Save
+                      </>
+                    )}
                   </button>
                 </div>
               </div>

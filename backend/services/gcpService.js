@@ -6,6 +6,7 @@ const { v4: uuidv4 } = require('uuid');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const gcpDatabaseService = require('./gcpDatabaseService');
 
 /**
  * GCP Service for handling Speech-to-Text and Natural Language API
@@ -173,46 +174,62 @@ class GcpService {
   /**
    * Generate SOAP note from transcription using Vertex AI
    * @param {string} transcription - Transcribed text
-   * @param {Object} options - Optional parameters (template, patient info, etc.)
+   * @param {Object} options - Optional parameters (templateId, specialty, patient info, etc.)
    * @returns {Promise<Object>} Structured SOAP note
    */
   async generateSoapNote(transcription, options = {}) {
     try {
-      console.log('Starting SOAP note generation with options:', JSON.stringify(options));
-      
-      // First, analyze the text with Natural Language API to extract entities
-      console.log('Analyzing text with Natural Language API...');
-      let analysis;
-      try {
-        analysis = await this.analyzeText(transcription);
-        console.log('Text analysis successful');
-      } catch (analysisError) {
-        console.error('Error in text analysis step:', analysisError);
-        throw new Error(`Text analysis failed: ${analysisError.message}`);
+      // Initialize Gemini model if not already done
+      if (!this.generativeModel) {
+        await this.getGeminiModel();
       }
+
+      // Analyze text to extract medical entities
+      const analysis = await this.analyzeText(transcription);
       
-      // Try to get a working Gemini model
-      console.log('Getting Gemini model...');
-      let model;
-      try {
-        model = await this.getGeminiModel();
-        console.log('Successfully got Gemini model');
-      } catch (modelError) {
-        console.error('Error getting Gemini model:', modelError);
-        throw new Error(`Failed to get Gemini model: ${modelError.message}`);
-      }
-      
-      // If no model is available, fall back to basic analysis
+      // Get a working Gemini model
+      const model = this.generativeModel;
       if (!model) {
-        console.error('No Gemini model available after successful call');
+        console.error('No Gemini model available');
         throw new Error('No Gemini model available');
+      }
+      
+      // Get template based on options
+      let template;
+      try {
+        if (options.templateId) {
+          // If templateId is provided, get specific template
+          template = await gcpDatabaseService.getTemplateById(options.templateId);
+          console.log('Using template by ID:', template.name);
+        } else if (options.specialty) {
+          // If specialty is provided, get default template for that specialty
+          const templates = await gcpDatabaseService.getTemplates(null, {
+            specialty: options.specialty,
+            includeSystem: true,
+            activeOnly: true
+          });
+          template = templates.find(t => t.is_system_template) || templates[0];
+          console.log('Using template by specialty:', template?.name);
+        } else {
+          // Default to Primary Care template if nothing specified
+          const templates = await gcpDatabaseService.getTemplates(null, {
+            specialty: 'Primary Care',
+            includeSystem: true,
+            activeOnly: true
+          });
+          template = templates.find(t => t.is_system_template) || templates[0];
+          console.log('Using default Primary Care template:', template?.name);
+        }
+      } catch (templateError) {
+        console.error('Error getting template:', templateError);
+        // Continue with default prompt if template retrieval fails
       }
       
       // Create a prompt for Gemini to generate a SOAP note
       console.log('Creating prompt for Gemini...');
-      const prompt = this.createSoapPrompt(transcription, analysis, options);
+      const prompt = this.createSoapPrompt(transcription, analysis, { ...options, template });
       
-      // Call Gemini model to generate SOAP note using the updated API approach
+      // Call Gemini model to generate SOAP note
       console.log('Calling Gemini model with prompt...');
       let result;
       try {
@@ -291,25 +308,45 @@ class GcpService {
    * @returns {string} Prompt for Gemini
    */
   createSoapPrompt(transcription, analysis, options = {}) {
-    const { template = 'soap', patientInfo = {} } = options;
-    
-    // Extract patient info if available - ensure patientInfo is an object
-    const safePatientInfo = patientInfo || {};
-    const patientName = safePatientInfo.name || 'the patient';
-    const patientAge = safePatientInfo.age || '';
-    const patientGender = safePatientInfo.gender || '';
-    const patientDob = safePatientInfo.dob || '';
+    // Extract patient info if available
+    const patientInfo = options.patientInfo || {};
+    const patientName = patientInfo.name || 'the patient';
+    const patientAge = patientInfo.age || '';
+    const patientGender = patientInfo.gender || '';
+    const patientDob = patientInfo.dob || '';
     
     // Create patient context string
     const patientContext = patientName !== 'the patient' 
       ? `Patient: ${patientName}${patientAge ? `, Age: ${patientAge}` : ''}${patientGender ? `, Gender: ${patientGender}` : ''}${patientDob ? `, DOB: ${patientDob}` : ''}`
       : '';
     
-    // Create a prompt based on the template
-    let prompt = '';
+    // Create a prompt based on the template from database or fallback to default
+    let promptTemplate;
     
-    if (template === 'soap') {
-      prompt = `
+    if (options.template && options.template.prompt_template) {
+      // Use the template from the database
+      promptTemplate = options.template.prompt_template;
+      console.log(`Using template: ${options.template.name}`);
+      
+      // Replace the {{transcription}} placeholder with the actual transcription
+      promptTemplate = promptTemplate.replace('{{transcription}}', transcription);
+      
+      // Add patient context and entities if not already included in the template
+      let finalPrompt = `You are a medical professional assistant.
+${patientContext ? `\nPatient Information: ${patientContext}\n` : ''}\n${promptTemplate}\n`;
+      
+      // Add entities detected
+      finalPrompt += `\nEntities detected in the transcript:\n${analysis.medicalEntities.map(entity => `- ${entity.name}: ${entity.type}`).join('\n')}\n`;
+      
+      // Add JSON format instructions if not in template
+      if (!finalPrompt.includes('JSON')) {
+        finalPrompt += `\nFormat your response as a JSON object with the following structure:\n{\n  "subjective": "Detailed subjective information...",\n  "objective": "Detailed objective information...",\n  "assessment": "Detailed assessment...",\n  "plan": "Detailed plan..."\n}\n`;
+      }
+      
+      return finalPrompt;
+    } else {
+      // Default SOAP template if no template is found
+      return `
 You are a medical professional assistant. Generate a comprehensive SOAP note based on the following medical dictation transcript.
 ${patientContext ? `\nPatient Information: ${patientContext}` : ''}
 
@@ -337,63 +374,7 @@ Format your response as a JSON object with the following structure:
 
 Only include information that is explicitly stated or can be reasonably inferred from the transcript. Do not invent information. If certain sections lack sufficient information, note this in your response.
 `;
-    } else if (template === 'followup') {
-      prompt = `
-You are a medical professional assistant. Generate a concise follow-up note based on the following medical dictation transcript.
-${patientContext ? `\nPatient Information: ${patientContext}` : ''}
-
-Medical Dictation Transcript:
-"""
-${transcription}
-"""
-
-Entities detected in the transcript:
-${analysis.medicalEntities.map(entity => `- ${entity.name}: ${entity.type}`).join('\n')}
-
-Please create a well-structured follow-up note with the following sections:
-1. Reason for Visit: Why the patient came in for follow-up.
-2. Progress: How the patient has progressed since the last visit.
-3. Current Status: Current symptoms, medication effectiveness, and any new issues.
-4. Plan: Adjustments to treatment, medications, and next steps.
-
-Format your response as a JSON object with the following structure:
-{
-  "reasonForVisit": "Detailed reason...",
-  "progress": "Detailed progress information...",
-  "currentStatus": "Detailed current status...",
-  "plan": "Detailed plan..."
-}
-
-Only include information that is explicitly stated or can be reasonably inferred from the transcript. Do not invent information. If certain sections lack sufficient information, note this in your response.
-`;
-    } else {
-      // Default to a general medical note
-      prompt = `
-You are a medical professional assistant. Generate a detailed medical note based on the following dictation transcript.
-${patientContext ? `\nPatient Information: ${patientContext}` : ''}
-
-Medical Dictation Transcript:
-"""
-${transcription}
-"""
-
-Entities detected in the transcript:
-${analysis.medicalEntities.map(entity => `- ${entity.name}: ${entity.type}`).join('\n')}
-
-Please create a well-structured medical note that captures all relevant clinical information from the transcript.
-
-Format your response as a JSON object with the following structure:
-{
-  "summary": "Brief summary of the encounter...",
-  "details": "Detailed clinical information...",
-  "conclusions": "Clinical impressions and next steps..."
-}
-
-Only include information that is explicitly stated or can be reasonably inferred from the transcript. Do not invent information. If certain sections lack sufficient information, note this in your response.
-`;
     }
-    
-    return prompt;
   }
   
   /**

@@ -12,6 +12,7 @@ dotenv.config();
 // Import routes
 const transcriptionRoutes = require('./routes/transcriptionRoutes');
 const notesRoutes = require('./routes/notesRoutes');
+const templateRoutes = require('./routes/templateRoutes');
 
 // Create Express app
 const app = express();
@@ -56,6 +57,7 @@ app.get('/health', (req, res) => {
 // API routes
 app.use('/api/transcription', transcriptionRoutes);
 app.use('/api/notes', notesRoutes);
+app.use('/api/templates', templateRoutes);
 
 // Global error handler
 app.use((err, req, res, next) => {

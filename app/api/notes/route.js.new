@@ -44,21 +44,7 @@ export async function GET(request) {
       }
       
       const token = authHeader.replace('Bearer ', '');
-      
-      // Initialize Supabase client properly
-      const supabase = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL,
-        process.env.SUPABASE_SERVICE_ROLE_KEY,
-        {
-          global: {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          },
-        }
-      );
-      
-      const { data: { user }, error } = await supabase.auth.getUser();
+      const { data: { user }, error } = await supabase.auth.getUser(token);
       
       if (error || !user) {
         return NextResponse.json(
@@ -89,7 +75,7 @@ export async function GET(request) {
     
     try {
       // Query the database for user's notes
-      const notes = await gcpDatabaseService.getNotes(userId, {
+      const notes = await gcpDatabaseService.getNotesByUserId(userId, {
         limit,
         offset,
         patientId
@@ -145,21 +131,7 @@ export async function POST(request) {
       }
       
       const token = authHeader.replace('Bearer ', '');
-      
-      // Initialize Supabase client properly
-      const supabase = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL,
-        process.env.SUPABASE_SERVICE_ROLE_KEY,
-        {
-          global: {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          },
-        }
-      );
-      
-      const { data: { user }, error } = await supabase.auth.getUser();
+      const { data: { user }, error } = await supabase.auth.getUser(token);
       
       if (error || !user) {
         return NextResponse.json(
@@ -186,64 +158,15 @@ export async function POST(request) {
       // Extract patient info or create a new patient if needed
       let patientId = null;
       if (body.patient) {
-        // Local implementation of findOrCreatePatient since it doesn't exist in the service
-        const patientData = body.patient;
-        
-        try {
-          // First try to find the patient by MRN if provided
-          if (patientData.mrn) {
-            // Search for patients with this MRN
-            const patientsResult = await gcpDatabaseService.getPatients(userId, {
-              searchTerm: patientData.mrn
-            });
-            
-            if (patientsResult.patients && patientsResult.patients.length > 0) {
-              // Found a patient with this MRN
-              patientId = patientsResult.patients[0].id;
-              console.log(`Found existing patient with MRN ${patientData.mrn}, ID: ${patientId}`);
-            }
-          }
-          
-          // If no patient found by MRN, try by name
-          if (!patientId && patientData.name) {
-            const nameParts = patientData.name.split(' ');
-            const firstName = nameParts[0] || '';
-            const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
-            
-            const patientsResult = await gcpDatabaseService.getPatients(userId, {
-              searchTerm: patientData.name
-            });
-            
-            if (patientsResult.patients && patientsResult.patients.length > 0) {
-              // Found a patient with this name
-              patientId = patientsResult.patients[0].id;
-              console.log(`Found existing patient with name ${patientData.name}, ID: ${patientId}`);
-            }
-          }
-          
-          // If still no patient found, create a new one
-          if (!patientId) {
-            console.log('Creating new patient');
-            const nameParts = patientData.name ? patientData.name.split(' ') : ['Unknown', 'Patient'];
-            const firstName = nameParts[0] || 'Unknown';
-            const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : 'Patient';
-            
-            const newPatient = await gcpDatabaseService.createPatient({
-              userId: userId,
-              firstName: firstName,
-              lastName: lastName,
-              dateOfBirth: patientData.dob || null,
-              gender: patientData.gender || null,
-              mrn: patientData.mrn || null
-            });
-            
-            patientId = newPatient.id;
-            console.log(`Created new patient with ID: ${patientId}`);
-          }
-        } catch (patientError) {
-          console.error('Error handling patient data:', patientError);
-          // Continue without patient association if there's an error
-        }
+        // Check if patient exists or create a new one
+        const patientResult = await gcpDatabaseService.findOrCreatePatient({
+          userId: userId,
+          name: body.patient.name,
+          dob: body.patient.dob,
+          gender: body.patient.gender,
+          mrn: body.patient.mrn
+        });
+        patientId = patientResult.id;
       }
 
       // Create note in the database

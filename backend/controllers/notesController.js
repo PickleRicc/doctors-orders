@@ -3,9 +3,8 @@
  * Handles saving and retrieving medical notes
  */
 
-// This would typically connect to a database service
-// For now, we'll use a simple in-memory store
-const notesStore = [];
+// Import the GCP database service
+const gcpDatabaseService = require('../services/gcpDatabaseService');
 
 class NotesController {
   /**
@@ -23,23 +22,34 @@ class NotesController {
         });
       }
 
-      // Create note object
-      const note = {
-        id: Date.now().toString(), // Simple ID generation
+      // Extract patient info or create a new patient if needed
+      let patientId = null;
+      if (req.body.patient) {
+        // Check if patient exists or create a new one
+        const patientResult = await gcpDatabaseService.findOrCreatePatient({
+          userId: req.userId,
+          name: req.body.patient.name,
+          dob: req.body.patient.dob,
+          gender: req.body.patient.gender,
+          mrn: req.body.patient.mrn
+        });
+        patientId = patientResult.id;
+      }
+
+      // Create note in the database
+      const note = await gcpDatabaseService.createNote({
         userId: req.userId, // From auth middleware
+        patientId: patientId,
         title: req.body.title,
-        patient: req.body.patient,
-        template: req.body.template,
         transcript: req.body.transcript,
+        templateId: req.body.template?.id,
         recordingTime: req.body.recordingTime,
         soapData: req.body.soapData,
-        timestamp: req.body.timestamp || new Date().toISOString(),
-        createdAt: new Date().toISOString(),
-      };
-
-      // In a real implementation, we would save to a database
-      // For now, just store in memory
-      notesStore.push(note);
+        metadata: {
+          source: 'dictation',
+          timestamp: req.body.timestamp || new Date().toISOString()
+        }
+      });
       
       // Return the created note
       return res.status(201).json({
@@ -62,9 +72,15 @@ class NotesController {
    */
   async getNotes(req, res) {
     try {
-      // In a real implementation, we would query the database
-      // For now, just filter the in-memory store
-      const userNotes = notesStore.filter(note => note.userId === req.userId);
+      // Get query parameters for filtering and pagination
+      const { limit = 20, offset = 0, patientId } = req.query;
+      
+      // Query the database for user's notes
+      const userNotes = await gcpDatabaseService.getNotesByUserId(req.userId, {
+        limit: parseInt(limit, 10),
+        offset: parseInt(offset, 10),
+        patientId
+      });
       
       return res.status(200).json({
         data: userNotes,
@@ -88,9 +104,8 @@ class NotesController {
     try {
       const noteId = req.params.id;
       
-      // In a real implementation, we would query the database
-      // For now, just find in the in-memory store
-      const note = notesStore.find(note => note.id === noteId && note.userId === req.userId);
+      // Query the database for the specific note
+      const note = await gcpDatabaseService.getNoteById(noteId, req.userId);
       
       if (!note) {
         return res.status(404).json({
@@ -121,25 +136,24 @@ class NotesController {
     try {
       const noteId = req.params.id;
       
-      // Find the note index
-      const noteIndex = notesStore.findIndex(note => note.id === noteId && note.userId === req.userId);
+      // Extract the fields to update
+      const updateData = {};
       
-      if (noteIndex === -1) {
+      // Only include fields that are allowed to be updated
+      if (req.body.title) updateData.title = req.body.title;
+      if (req.body.transcript) updateData.transcript = req.body.transcript;
+      if (req.body.soapData) updateData.soapData = req.body.soapData;
+      if (req.body.patientId) updateData.patientId = req.body.patientId;
+      
+      // Update the note in the database
+      const updatedNote = await gcpDatabaseService.updateNote(noteId, req.userId, updateData);
+      
+      if (!updatedNote) {
         return res.status(404).json({
           data: null,
           error: 'Note not found'
         });
       }
-      
-      // Update the note
-      const updatedNote = {
-        ...notesStore[noteIndex],
-        ...req.body,
-        updatedAt: new Date().toISOString()
-      };
-      
-      // Save the updated note
-      notesStore[noteIndex] = updatedNote;
       
       return res.status(200).json({
         data: updatedNote,
@@ -163,18 +177,15 @@ class NotesController {
     try {
       const noteId = req.params.id;
       
-      // Find the note index
-      const noteIndex = notesStore.findIndex(note => note.id === noteId && note.userId === req.userId);
+      // Delete the note from the database
+      const result = await gcpDatabaseService.deleteNote(noteId, req.userId);
       
-      if (noteIndex === -1) {
+      if (!result) {
         return res.status(404).json({
           data: null,
           error: 'Note not found'
         });
       }
-      
-      // Remove the note
-      notesStore.splice(noteIndex, 1);
       
       return res.status(200).json({
         data: { id: noteId, deleted: true },

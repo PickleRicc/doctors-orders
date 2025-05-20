@@ -9,75 +9,135 @@ import NoteCard from "../../components/notes/NoteCard";
  */
 export default async function NotePage({ params }) {
   // Get the note ID from the URL params
-  const { id } = params;
+  const id = params.id;
   
   // Server-side authentication check
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   
-  // In a real implementation, we would fetch the specific note from the GCP backend
-  // For now, we'll use placeholder data based on the ID
+  // Fetch the specific note from the API
+  let note = null;
+  let error = null;
   
-  // Dummy notes data (same as in the main notes page)
-  const dummyNotes = [
-    {
-      id: "1",
-      title: "Patient: John Doe - Initial Consultation",
-      date: "2025-05-15T10:30:00Z",
-      patient: "John Doe",
-      type: "SOAP Note",
-      tags: ["Hypertension", "Diabetes"],
-      snippet: "Patient presents with complaints of persistent headaches and fatigue for the past two weeks. Reports increased stress at work.",
-      content: {
-        subjective: "Patient is a 45-year-old male presenting with complaints of persistent headaches and fatigue for the past two weeks. Reports increased stress at work and difficulty sleeping. Headaches are described as throbbing, primarily in the frontal region, and typically worse in the afternoon. Patient has been taking over-the-counter ibuprofen with minimal relief.",
-        objective: "Vital Signs:\n- BP: 142/88 mmHg\n- HR: 78 bpm\n- RR: 16/min\n- Temp: 98.6°F\n- SpO2: 98%\n\nPhysical Examination:\n- General: Alert and oriented, appears tired\n- HEENT: Normocephalic, atraumatic, no sinus tenderness\n- CV: Regular rate and rhythm, no murmurs\n- Resp: Clear to auscultation bilaterally\n- Neuro: CN II-XII intact, no focal deficits",
-        assessment: "1. Tension headaches, likely related to stress and possible hypertension\n2. Fatigue, possibly related to poor sleep quality\n3. Elevated blood pressure, consistent with hypertension",
-        plan: "1. Start lisinopril 10mg daily for hypertension\n2. Recommend stress management techniques and sleep hygiene practices\n3. Advise to limit caffeine intake, especially in the afternoon\n4. Follow-up in 2 weeks to reassess blood pressure and headache symptoms\n5. Complete blood count and basic metabolic panel ordered"
+  try {
+    // Get auth token for API request
+    const authToken = process.env.NODE_ENV === 'development' 
+      ? 'dev-token' // Use a dev token in development
+      : user?.token?.access_token; // Use the real token in production
+    
+    // Fetch the note from the API
+    const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api'}/notes/${id}`, {
+      headers: {
+        'Authorization': `Bearer ${authToken}`
       }
-    },
-    {
-      id: "2",
-      title: "Patient: Jane Smith - Follow-up Visit",
-      date: "2025-05-14T14:15:00Z",
-      patient: "Jane Smith",
-      type: "Progress Note",
-      tags: ["Asthma", "Allergies"],
-      snippet: "Patient returns for follow-up of asthma management. Reports improved symptoms with current medication regimen.",
-      content: "Patient returns for follow-up of asthma management. Reports improved symptoms with current medication regimen. No recent exacerbations or ER visits. Using rescue inhaler approximately once per week, typically after exercise.\n\nVital signs stable. Lung exam reveals good air entry bilaterally with no wheezing.\n\nAssessment: Well-controlled asthma\n\nPlan:\n1. Continue current medications\n2. Refill albuterol inhaler\n3. Encouraged continued exercise with appropriate pre-treatment\n4. Return in 6 months for routine follow-up"
-    },
-    {
-      id: "3",
-      title: "Patient: Robert Johnson - New Patient Visit",
-      date: "2025-05-12T09:00:00Z",
-      patient: "Robert Johnson",
-      type: "SOAP Note",
-      tags: ["Back Pain", "Physical Therapy"],
-      snippet: "New patient intake for chronic lower back pain. Patient reports pain began approximately 3 months ago after lifting heavy furniture.",
-      content: {
-        subjective: "New patient intake for chronic lower back pain. Patient reports pain began approximately 3 months ago after lifting heavy furniture. Describes pain as dull and aching, occasionally sharp with certain movements. Pain is located in the lumbar region with occasional radiation to the right buttock. Rates pain as 4-7/10, worse with prolonged sitting and bending. Has tried over-the-counter NSAIDs with moderate relief.",
-        objective: "Vital Signs:\n- BP: 124/76 mmHg\n- HR: 72 bpm\n- RR: 14/min\n- Temp: 98.4°F\n\nPhysical Examination:\n- MSK: Decreased range of motion in lumbar spine, especially with flexion. Tenderness to palpation over right paraspinal muscles. Negative straight leg raise bilaterally. Normal strength in lower extremities.\n- Neuro: DTRs 2+ and symmetric. No sensory deficits.",
-        assessment: "1. Chronic mechanical low back pain, likely muscular in origin\n2. No evidence of radiculopathy or neurological compromise",
-        plan: "1. Prescribed cyclobenzaprine 5mg at bedtime for muscle spasm\n2. Referred to physical therapy for core strengthening and proper body mechanics\n3. Advised continued use of NSAIDs as needed\n4. Discussed importance of proper lifting techniques\n5. Return in 4 weeks to assess progress"
+    });
+    
+    if (!response.ok) {
+      console.error(`API error: ${response.status} ${response.statusText}`);
+      // For development, fall back to dummy data if API fails
+      if (process.env.NODE_ENV === 'development') {
+        console.log('Development mode: Using fallback dummy data');
+        // Create a dummy note for development purposes
+        note = {
+          id,
+          title: `Development Note ${id}`,
+          date: new Date().toISOString(),
+          patient: "Test Patient",
+          type: "SOAP Note",
+          tags: ["Development", "Test"],
+          snippet: "This is a fallback note created for development purposes when the API is unavailable.",
+          content: {
+            subjective: "Patient reports symptoms consistent with the test case.",
+            objective: "Examination reveals expected test results.",
+            assessment: "Development testing in progress.",
+            plan: "Continue development and fix API issues."
+          }
+        };
+        return; // Skip the error throw to use the fallback note
       }
-    },
-    {
-      id: "4",
-      title: "Patient: Sarah Williams - Annual Physical",
-      date: "2025-05-10T11:00:00Z",
-      patient: "Sarah Williams",
-      type: "Preventive Care",
-      tags: ["Annual Exam", "Preventive"],
-      snippet: "Patient presents for annual physical examination. No significant health concerns reported.",
-      content: "Patient presents for annual physical examination. No significant health concerns reported. Maintains active lifestyle with regular exercise 3-4 times per week. Non-smoker, occasional alcohol use (1-2 drinks per week).\n\nVital signs within normal limits. Physical exam unremarkable.\n\nAssessment: Healthy adult female\n\nPlan:\n1. Routine labs ordered including CBC, CMP, lipid panel\n2. Mammogram scheduled\n3. Flu vaccine administered\n4. Return in one year for next annual exam"
+      
+      throw new Error(`Failed to fetch note: ${response.status}`);
     }
-  ];
+    
+    const result = await response.json();
+    
+    if (result.error) {
+      throw new Error(result.error);
+    }
+    
+    if (!result.data) {
+      throw new Error('Note not found');
+    }
+    
+    // Transform the note to match the expected format for the NoteCard component
+    const rawNote = result.data;
+    
+    // Parse the SOAP data if it's a string
+    let soapData = rawNote.soap_data;
+    if (typeof soapData === 'string') {
+      try {
+        soapData = JSON.parse(soapData);
+      } catch (e) {
+        console.error('Error parsing SOAP data:', e);
+        soapData = {
+          subjective: 'Error parsing data',
+          objective: 'Error parsing data',
+          assessment: 'Error parsing data',
+          plan: 'Error parsing data'
+        };
+      }
+    }
+    
+    // Ensure SOAP data has the expected structure
+    const formattedSoapData = {
+      subjective: soapData?.subjective || '',
+      objective: soapData?.objective || '',
+      assessment: soapData?.assessment || '',
+      plan: soapData?.plan || ''
+    };
+    
+    note = {
+      id: rawNote.id,
+      title: rawNote.title || 'Untitled Note',
+      date: rawNote.created_at || rawNote.timestamp || new Date().toISOString(),
+      patient: rawNote.first_name && rawNote.last_name ? 
+        `${rawNote.first_name} ${rawNote.last_name}` : 
+        (rawNote.patient_name || 'No Patient'),
+      type: 'SOAP Note',
+      tags: rawNote.tags || [],
+      snippet: rawNote.raw_transcript ? 
+        rawNote.raw_transcript.substring(0, 150) + (rawNote.raw_transcript.length > 150 ? '...' : '') : 
+        'No content',
+      content: formattedSoapData
+    };
+    
+  } catch (err) {
+    console.error('Error fetching note:', err);
+    error = err.message;
+    
+    // For development, create a dummy note if there's an error
+    if (process.env.NODE_ENV === 'development') {
+      console.log('Development mode: Creating dummy note due to error');
+      note = {
+        id,
+        title: `Development Note ${id}`,
+        date: new Date().toISOString(),
+        patient: "Test Patient",
+        type: "SOAP Note",
+        tags: ["Development", "Test", "Error"],
+        snippet: "This is a fallback note created for development purposes when an error occurs.",
+        content: {
+          subjective: "Patient reports symptoms consistent with the test case.",
+          objective: "Examination reveals expected test results.",
+          assessment: "Development testing in progress. Error encountered: " + err.message,
+          plan: "Debug the API error and fix the issue."
+        }
+      };
+    }
+  }
   
-  // Find the note with the matching ID
-  const note = dummyNotes.find(note => note.id === id);
-  
-  // If no note is found, we could handle this with a "not found" UI
-  // For now, we'll just use a simple message
-  if (!note) {
+  // If no note is found or there was an error, show a "not found" UI
+  if (!note || error) {
     return (
       <div className="p-6 max-w-6xl mx-auto">
         <Link href="/notes" className="flex items-center text-royal hover:underline mb-6">
@@ -87,7 +147,9 @@ export default async function NotePage({ params }) {
         
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-8 text-center">
           <h1 className="text-2xl font-bold mb-4">Note Not Found</h1>
-          <p className="text-gray-500 mb-6">The note you're looking for doesn't exist or has been deleted.</p>
+          <p className="text-gray-500 mb-6">
+            {error ? `Error: ${error}` : "The note you're looking for doesn't exist or has been deleted."}
+          </p>
           <Link 
             href="/notes" 
             className="inline-block px-4 py-2 bg-royal text-white rounded-md hover:bg-royal-700 transition-colors"
