@@ -65,6 +65,19 @@ async function validateToken(token) {
 
 // GET /api/templates - Get all templates
 export async function GET(request) {
+  // Set CORS headers for all responses
+  const headers = new Headers({
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Content-Type': 'application/json'
+  });
+
+  // Handle preflight requests
+  if (request.method === 'OPTIONS') {
+    return new NextResponse(null, { status: 204, headers });
+  }
+
   try {
     // Extract auth token
     const token = getAuthToken(request.headers);
@@ -74,7 +87,7 @@ export async function GET(request) {
       return NextResponse.json({ 
         data: null, 
         error: 'Authentication required' 
-      }, { status: 401 });
+      }, { status: 401, headers });
     }
     
     // Extract user ID from token
@@ -88,7 +101,7 @@ export async function GET(request) {
         return NextResponse.json({ 
           data: null, 
           error: 'Invalid authentication token' 
-        }, { status: 401 });
+        }, { status: 401, headers });
       }
     } else {
       // For development, use a mock user ID
@@ -134,14 +147,14 @@ export async function GET(request) {
     return NextResponse.json({ 
       data: templates, 
       error: null 
-    });
+    }, { headers });
   } catch (error) {
     console.error('Error fetching templates:', error);
     
     return NextResponse.json({ 
       data: null, 
       error: error.message || 'Failed to fetch templates' 
-    }, { status: 500 });
+    }, { status: 500, headers });
   }
 }
 

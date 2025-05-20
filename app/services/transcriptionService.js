@@ -3,8 +3,8 @@
  * Handles communication with the backend for transcription and SOAP note generation
  */
 
-// Update to use port 3000 to match our API routes
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api';
+// Use a relative URL that works in all environments
+const API_BASE_URL = '/api';
 
 /**
  * Generate a SOAP note from a transcript using GCP Natural Language API

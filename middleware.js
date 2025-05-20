@@ -1,8 +1,40 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse } from "next/server";
 
+// Middleware function to handle CORS
+export function corsMiddleware(request) {
+  // Get the origin from the request headers
+  const origin = request.headers.get('origin') || '*';
+  
+  // Only apply CORS headers to API routes
+  if (request.nextUrl.pathname.startsWith('/api')) {
+    // Create a response object
+    const response = NextResponse.next();
+    
+    // Set CORS headers
+    response.headers.set('Access-Control-Allow-Origin', origin);
+    response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    response.headers.set('Access-Control-Allow-Credentials', 'true');
+    
+    // Handle preflight requests
+    if (request.method === 'OPTIONS') {
+      return new NextResponse(null, {
+        status: 204,
+        headers: response.headers,
+      });
+    }
+    
+    return response;
+  }
+  
+  return NextResponse.next();
+}
+
 export async function middleware(req) {
-  const res = NextResponse.next();
+  const res = await corsMiddleware(req);
+
+  if (res) return res;
 
   try {
     // Create Supabase client for auth checks
@@ -74,5 +106,6 @@ export async function middleware(req) {
 export const config = {
   matcher: [
     "/((?!_next/static|_next/image|favicon.ico|public|api/webhook).*)",
+    '/api/:path*',
   ],
 };
