@@ -24,11 +24,48 @@ function getGcpDatabaseService() {
   return gcpDatabaseServicePromise;
 }
 
+// Helper function to ensure proxy is running in production
+async function ensureProxyRunning() {
+  // Only needed in production
+  if (process.env.NODE_ENV !== 'production') {
+    return true;
+  }
+  
+  try {
+    console.log('Checking if Cloud SQL Proxy is running...');
+    // Make a request to the proxy endpoint
+    const response = await fetch(`${process.env.FRONTEND_URL || 'https://doctors-orders-sigma.vercel.app'}/api/proxy`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+    
+    const data = await response.json();
+    console.log('Proxy status:', data);
+    
+    // If already running or started successfully, return true
+    return data.status === 'already_running' || data.status === 'started';
+  } catch (error) {
+    console.error('Error ensuring proxy is running:', error);
+    return false;
+  }
+}
+
 /**
  * GET /api/notes
  * Get all notes for the authenticated user
  */
 export async function GET(request) {
+  // Ensure proxy is running in production
+  const proxyReady = await ensureProxyRunning();
+  if (!proxyReady && process.env.NODE_ENV === 'production') {
+    return NextResponse.json({
+      data: null,
+      error: 'Database connection not available. Please try again in a moment.'
+    }, { status: 503 });
+  }
+  
   try {
     // Verify authentication (optional in dev)
     const authHeader = request.headers.get('authorization');
@@ -120,6 +157,15 @@ export async function GET(request) {
  * Create a new note
  */
 export async function POST(request) {
+  // Ensure proxy is running in production
+  const proxyReady = await ensureProxyRunning();
+  if (!proxyReady && process.env.NODE_ENV === 'production') {
+    return NextResponse.json({
+      data: null,
+      error: 'Database connection not available. Please try again in a moment.'
+    }, { status: 503 });
+  }
+  
   try {
     // Parse request body
     const body = await request.json();

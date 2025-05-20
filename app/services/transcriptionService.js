@@ -285,9 +285,9 @@ async function getAuthToken() {
       return token;
     }
     
-    // If no token is found, redirect to login
-    console.warn('No auth token found, redirecting to login');
-    window.location.href = '/login?redirectTo=' + encodeURIComponent(window.location.pathname);
+    // If no token is found, redirect to sign-in page
+    console.warn('No auth token found, redirecting to sign-in page');
+    window.location.href = '/auth/signin?redirectTo=' + encodeURIComponent(window.location.pathname);
     return null;
   } catch (error) {
     console.error('Error getting auth token:', error);
@@ -297,8 +297,8 @@ async function getAuthToken() {
       return 'dev-token';
     }
     
-    // In production, redirect to login if there's an auth error
-    window.location.href = '/login?redirectTo=' + encodeURIComponent(window.location.pathname);
+    // In production with error, redirect to sign-in page
+    window.location.href = '/auth/signin?redirectTo=' + encodeURIComponent(window.location.pathname);
     throw error;
   }
 }
