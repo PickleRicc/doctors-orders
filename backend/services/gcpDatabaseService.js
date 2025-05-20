@@ -18,11 +18,11 @@ class GcpDatabaseService {
     // Initialize connection pool
     this.pool = new Pool({
       user: process.env.GCP_DB_USER,
-      host: process.env.GCP_DB_HOST,
+      host: process.env.NODE_ENV === 'production' ? '127.0.0.1' : process.env.GCP_DB_HOST, // Use localhost in production for proxy
       database: process.env.GCP_DB_NAME,
       password: process.env.GCP_DB_PASSWORD,
       port: process.env.GCP_DB_PORT || 5432,
-      ssl: process.env.NODE_ENV === 'production',
+      ssl: process.env.NODE_ENV === 'production' ? false : process.env.NODE_ENV === 'production', // Disable SSL when using proxy
       max: 20, // Maximum number of clients in the pool
       idleTimeoutMillis: 30000, // How long a client is allowed to remain idle before being closed
       connectionTimeoutMillis: 5000, // How long to wait for a connection (increased for debugging)
