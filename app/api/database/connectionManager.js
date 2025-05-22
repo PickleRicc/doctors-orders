@@ -39,11 +39,17 @@ function getConnectionString() {
       throw new Error(`Missing required environment variables: ${missingVars.join(', ')}`);
     }
     
-    // Parse the instance connection name to get project, region, and instance
-    const [project, region, instance] = process.env.GCP_INSTANCE_CONNECTION_NAME.split(':');
+    // For production, we need to use the public IP address directly
+    // The format for Cloud SQL hostname is different than what we had
     
-    // For production, use the public IP with SSL
-    return `postgresql://${process.env.GCP_DB_USER}:${process.env.GCP_DB_PASSWORD}@${instance}.${region}.${project}.cloudsql.com:5432/${process.env.GCP_DB_NAME}`;
+    // If GCP_DB_HOST is provided, use it directly
+    if (process.env.GCP_DB_HOST && process.env.GCP_DB_HOST !== '127.0.0.1') {
+      return `postgresql://${process.env.GCP_DB_USER}:${encodeURIComponent(process.env.GCP_DB_PASSWORD)}@${process.env.GCP_DB_HOST}:${process.env.GCP_DB_PORT || 5432}/${process.env.GCP_DB_NAME}`;
+    }
+    
+    // Fallback to constructing the hostname from the instance connection name
+    const [project, region, instance] = process.env.GCP_INSTANCE_CONNECTION_NAME.split(':');
+    return `postgresql://${process.env.GCP_DB_USER}:${encodeURIComponent(process.env.GCP_DB_PASSWORD)}@${project}:${region}:${instance}.cloudsql.com:5432/${process.env.GCP_DB_NAME}`;
   } 
   
   // In development, use localhost connection through Cloud SQL Proxy
@@ -57,9 +63,11 @@ function getConnectionString() {
 function getSslConfig() {
   // In production, use SSL
   if (process.env.NODE_ENV === 'production') {
+    // For Google Cloud SQL, we need to disable certificate validation
+    // This is safe because we're connecting to a known host
     return {
-      rejectUnauthorized: false, // Needed for self-signed certs
-      // In production, we don't need to provide cert files as Google Cloud manages this
+      rejectUnauthorized: false, // Required for Google Cloud SQL
+      // No need for certificate files as Google Cloud manages SSL
     };
   }
   
@@ -85,9 +93,11 @@ export function createConnectionPool(connectionName = 'default') {
   const poolConfig = {
     connectionString: getConnectionString(),
     ssl: getSslConfig(),
-    max: 10, // Maximum number of clients in the pool
-    idleTimeoutMillis: 30000, // How long a client is allowed to remain idle before being closed
-    connectionTimeoutMillis: 5000, // How long to wait for a connection to become available
+    max: process.env.NODE_ENV === 'production' ? 3 : 10, // Fewer connections in serverless environment
+    idleTimeoutMillis: process.env.NODE_ENV === 'production' ? 10000 : 30000, // Shorter idle timeout in production
+    connectionTimeoutMillis: 10000, // Longer timeout to account for cold starts
+    statement_timeout: 30000, // Timeout for statements
+    query_timeout: 30000, // Timeout for queries
   };
   
   // Create a new pool
@@ -140,10 +150,38 @@ export async function query(text, params = [], connectionName = 'default') {
  */
 export async function isDatabaseHealthy(connectionName = 'default') {
   try {
+    // Log connection string (without credentials) for debugging
+    const connString = getConnectionString();
+    const sanitizedConnString = connString.replace(/:[^:@]*@/, ':***@');
+    console.log(`Checking database health with connection: ${sanitizedConnString}`);
+    
+    // Get SSL config for debugging
+    const sslConfig = getSslConfig();
+    console.log(`SSL config: ${JSON.stringify(sslConfig)}`);
+    
+    // Attempt a simple query to check connection
     const result = await query('SELECT 1 as health_check', [], connectionName);
-    return result.rows[0].health_check === 1;
+    
+    if (result.rows[0].health_check === 1) {
+      console.log('Database health check successful');
+      return true;
+    } else {
+      console.error('Database health check returned unexpected result:', result.rows[0]);
+      return false;
+    }
   } catch (error) {
-    console.error('Database health check failed:', error);
+    console.error('Database health check failed with error:', error.message);
+    console.error('Error details:', error);
+    
+    // Log specific error types for better debugging
+    if (error.code === 'ENOTFOUND') {
+      console.error('Host not found. Check your GCP_DB_HOST or GCP_INSTANCE_CONNECTION_NAME');
+    } else if (error.code === 'ECONNREFUSED') {
+      console.error('Connection refused. Check if the database server is running and accessible');
+    } else if (error.code === 'ETIMEDOUT') {
+      console.error('Connection timed out. Check network connectivity and firewall settings');
+    }
+    
     return false;
   }
 }
