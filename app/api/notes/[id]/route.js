@@ -1,26 +1,54 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { validateAuthToken, formatApiResponse } from '../../auth/authUtils';
+import { isDatabaseHealthy } from '../../database/connectionManager';
 
-// Initialize Supabase client
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+/**
+ * Individual Note API Route
+ * Handles operations for a specific note by ID
+ * Uses direct SSL connection in production for better reliability
+ */
 
 // Dynamic import for CommonJS modules
-let gcpDatabaseServicePromise = null;
-function getGcpDatabaseService() {
-  if (!gcpDatabaseServicePromise) {
-    // Use a relative path instead of process.cwd()
-    gcpDatabaseServicePromise = import('../../../../backend/services/gcpDatabaseService.js')
+let databaseServicePromise = null;
+function getDatabaseService() {
+  if (!databaseServicePromise) {
+    // In production, use the serverless database service
+    // In development, use the GCP database service with proxy
+    const servicePath = process.env.NODE_ENV === 'production'
+      ? '../../../../backend/services/serverlessDatabaseService.js'
+      : '../../../../backend/services/gcpDatabaseService.js';
+      
+    databaseServicePromise = import(servicePath)
       .then(module => {
         // Handle both ESM default exports and CommonJS module.exports
         return module.default || module;
       })
       .catch(err => {
-        console.error('Error importing GCP database service:', err);
+        console.error('Error importing database service:', err);
         return null;
       });
   }
-  return gcpDatabaseServicePromise;
+  return databaseServicePromise;
+}
+
+/**
+ * Helper function to ensure database connection is available
+ * @returns {Promise<boolean>} Whether the database is connected
+ */
+async function ensureDatabaseConnection() {
+  try {
+    // In production, we use direct SSL connection, so just check if it's healthy
+    if (process.env.NODE_ENV === 'production') {
+      return await isDatabaseHealthy();
+    } else {
+      // For development, import and use the proxy manager
+      const { isProxyHealthy } = await import('../../proxy/proxyManager');
+      return await isProxyHealthy();
+    }
+  } catch (error) {
+    console.error('Error ensuring database connection:', error);
+    return false;
+  }
 }
 
 /**
@@ -28,75 +56,53 @@ function getGcpDatabaseService() {
  * Get a single note by ID
  */
 export async function GET(request, { params }) {
+  // Ensure database connection is available
+  const connected = await ensureDatabaseConnection();
+  if (!connected) {
+    return formatApiResponse(
+      null, 
+      'Database connection not available. Please try again in a moment.',
+      503
+    );
+  }
+  
   try {
     // Await params to fix Next.js warning
     const { id: noteId } = params;
     
-    // Verify authentication (optional in dev)
-    const authHeader = request.headers.get('authorization');
-    // Use a valid UUID for dev mode instead of a string
-    let userId = '00000000-0000-0000-0000-000000000000'; // Valid UUID for dev mode
+    // Validate authentication using our utility
+    const userId = await validateAuthToken(request);
     
-    if (process.env.NODE_ENV === 'production') {
-      if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return NextResponse.json(
-          { data: null, error: 'Unauthorized' },
-          { status: 401 }
-        );
-      }
-      
-      const token = authHeader.replace('Bearer ', '');
-      const { data: { user }, error } = await supabase.auth.getUser(token);
-      
-      if (error || !user) {
-        return NextResponse.json(
-          { data: null, error: 'Invalid token' },
-          { status: 401 }
-        );
-      }
-      
-      userId = user.id;
-    }
+    // Get the database service
+    const databaseService = await getDatabaseService();
     
-    // Get the GCP database service
-    const gcpDatabaseService = await getGcpDatabaseService();
-    
-    if (!gcpDatabaseService) {
-      console.error('GCP database service not available');
-      return NextResponse.json(
-        { data: null, error: 'Database service unavailable' },
-        { status: 500 }
-      );
+    if (!databaseService) {
+      console.error('Database service not available');
+      return formatApiResponse(null, 'Database service unavailable', 500);
     }
     
     try {
       // Query the database for the specific note
-      const note = await gcpDatabaseService.getNoteById(noteId, userId);
+      const note = await databaseService.getNote(noteId, userId);
       
       if (!note) {
-        return NextResponse.json(
-          { data: null, error: 'Note not found' },
-          { status: 404 }
-        );
+        return formatApiResponse(null, 'Note not found', 404);
       }
       
-      return NextResponse.json({
-        data: note,
-        error: null
-      });
+      return formatApiResponse(note);
     } catch (dbError) {
       console.error('Error retrieving from database:', dbError);
-      return NextResponse.json(
-        { data: null, error: `Database error: ${dbError.message}` },
-        { status: 500 }
-      );
+      return formatApiResponse(null, `Database error: ${dbError.message}`, 500);
     }
   } catch (error) {
     console.error('Error getting note:', error);
-    return NextResponse.json(
-      { data: null, error: `Failed to get note: ${error.message}` },
-      { status: 500 }
-    );
+    
+    // Handle authentication errors specifically
+    if (error.message && error.message.includes('Unauthorized')) {
+      return formatApiResponse(null, error.message, 401);
+    }
+    
+    return formatApiResponse(null, `Failed to get note: ${error.message}`, 500);
   }
 }
 
@@ -105,46 +111,30 @@ export async function GET(request, { params }) {
  * Update a note
  */
 export async function PUT(request, { params }) {
+  // Ensure database connection is available
+  const connected = await ensureDatabaseConnection();
+  if (!connected) {
+    return formatApiResponse(
+      null, 
+      'Database connection not available. Please try again in a moment.',
+      503
+    );
+  }
+  
   try {
     // Await params to fix Next.js warning
     const { id: noteId } = params;
     const body = await request.json();
     
-    // Verify authentication (optional in dev)
-    const authHeader = request.headers.get('authorization');
-    // Use a valid UUID for dev mode instead of a string
-    let userId = '00000000-0000-0000-0000-000000000000'; // Valid UUID for dev mode
+    // Validate authentication using our utility
+    const userId = await validateAuthToken(request);
     
-    if (process.env.NODE_ENV === 'production') {
-      if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return NextResponse.json(
-          { data: null, error: 'Unauthorized' },
-          { status: 401 }
-        );
-      }
-      
-      const token = authHeader.replace('Bearer ', '');
-      const { data: { user }, error } = await supabase.auth.getUser(token);
-      
-      if (error || !user) {
-        return NextResponse.json(
-          { data: null, error: 'Invalid token' },
-          { status: 401 }
-        );
-      }
-      
-      userId = user.id;
-    }
+    // Get the database service
+    const databaseService = await getDatabaseService();
     
-    // Get the GCP database service
-    const gcpDatabaseService = await getGcpDatabaseService();
-    
-    if (!gcpDatabaseService) {
-      console.error('GCP database service not available');
-      return NextResponse.json(
-        { data: null, error: 'Database service unavailable' },
-        { status: 500 }
-      );
+    if (!databaseService) {
+      console.error('Database service not available');
+      return formatApiResponse(null, 'Database service unavailable', 500);
     }
     
     try {
@@ -153,37 +143,32 @@ export async function PUT(request, { params }) {
       
       // Only include fields that are allowed to be updated
       if (body.title) updateData.title = body.title;
-      if (body.transcript) updateData.transcript = body.transcript;
-      if (body.soapData) updateData.soapData = body.soapData;
-      if (body.patientId) updateData.patientId = body.patientId;
+      if (body.content) updateData.content = body.content;
+      if (body.raw_transcript) updateData.raw_transcript = body.raw_transcript;
+      if (body.soap_data) updateData.soap_data = body.soap_data;
+      if (body.patient_id) updateData.patient_id = body.patient_id;
       
       // Update the note in the database
-      const updatedNote = await gcpDatabaseService.updateNote(noteId, userId, updateData);
+      const updatedNote = await databaseService.updateNote(noteId, updateData, userId);
       
       if (!updatedNote) {
-        return NextResponse.json(
-          { data: null, error: 'Note not found' },
-          { status: 404 }
-        );
+        return formatApiResponse(null, 'Note not found', 404);
       }
       
-      return NextResponse.json({
-        data: updatedNote,
-        error: null
-      });
+      return formatApiResponse(updatedNote);
     } catch (dbError) {
       console.error('Error updating database:', dbError);
-      return NextResponse.json(
-        { data: null, error: `Database error: ${dbError.message}` },
-        { status: 500 }
-      );
+      return formatApiResponse(null, `Database error: ${dbError.message}`, 500);
     }
   } catch (error) {
     console.error('Error updating note:', error);
-    return NextResponse.json(
-      { data: null, error: `Failed to update note: ${error.message}` },
-      { status: 500 }
-    );
+    
+    // Handle authentication errors specifically
+    if (error.message && error.message.includes('Unauthorized')) {
+      return formatApiResponse(null, error.message, 401);
+    }
+    
+    return formatApiResponse(null, `Failed to update note: ${error.message}`, 500);
   }
 }
 
@@ -192,74 +177,66 @@ export async function PUT(request, { params }) {
  * Delete a note
  */
 export async function DELETE(request, { params }) {
+  // Ensure database connection is available
+  const connected = await ensureDatabaseConnection();
+  if (!connected) {
+    return formatApiResponse(
+      null, 
+      'Database connection not available. Please try again in a moment.',
+      503
+    );
+  }
+  
   try {
     // Await params to fix Next.js warning
     const { id: noteId } = params;
     
-    // Verify authentication (optional in dev)
-    const authHeader = request.headers.get('authorization');
-    // Use a valid UUID for dev mode instead of a string
-    let userId = '00000000-0000-0000-0000-000000000000'; // Valid UUID for dev mode
+    // Validate authentication using our utility
+    const userId = await validateAuthToken(request);
     
-    if (process.env.NODE_ENV === 'production') {
-      if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return NextResponse.json(
-          { data: null, error: 'Unauthorized' },
-          { status: 401 }
-        );
-      }
-      
-      const token = authHeader.replace('Bearer ', '');
-      const { data: { user }, error } = await supabase.auth.getUser(token);
-      
-      if (error || !user) {
-        return NextResponse.json(
-          { data: null, error: 'Invalid token' },
-          { status: 401 }
-        );
-      }
-      
-      userId = user.id;
-    }
+    // Get the database service
+    const databaseService = await getDatabaseService();
     
-    // Get the GCP database service
-    const gcpDatabaseService = await getGcpDatabaseService();
-    
-    if (!gcpDatabaseService) {
-      console.error('GCP database service not available');
-      return NextResponse.json(
-        { data: null, error: 'Database service unavailable' },
-        { status: 500 }
-      );
+    if (!databaseService) {
+      console.error('Database service not available');
+      return formatApiResponse(null, 'Database service unavailable', 500);
     }
     
     try {
       // Delete the note from the database
-      const result = await gcpDatabaseService.deleteNote(noteId, userId);
+      const result = await databaseService.deleteNote(noteId, userId);
       
       if (!result) {
-        return NextResponse.json(
-          { data: null, error: 'Note not found' },
-          { status: 404 }
-        );
+        return formatApiResponse(null, 'Note not found', 404);
       }
       
-      return NextResponse.json({
-        data: { id: noteId, deleted: true },
-        error: null
-      });
+      return formatApiResponse({ id: noteId, deleted: true });
     } catch (dbError) {
       console.error('Error deleting from database:', dbError);
-      return NextResponse.json(
-        { data: null, error: `Database error: ${dbError.message}` },
-        { status: 500 }
-      );
+      return formatApiResponse(null, `Database error: ${dbError.message}`, 500);
     }
   } catch (error) {
     console.error('Error deleting note:', error);
-    return NextResponse.json(
-      { data: null, error: `Failed to delete note: ${error.message}` },
-      { status: 500 }
-    );
+    
+    // Handle authentication errors specifically
+    if (error.message && error.message.includes('Unauthorized')) {
+      return formatApiResponse(null, error.message, 401);
+    }
+    
+    return formatApiResponse(null, `Failed to delete note: ${error.message}`, 500);
   }
+}
+
+/**
+ * OPTIONS /api/notes/[id] - Handle CORS preflight requests
+ */
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 204,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, PUT, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+    }
+  });
 }

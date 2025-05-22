@@ -1,30 +1,36 @@
 import { NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
 import { validateAuthToken, formatApiResponse } from '../auth/authUtils';
-import { isProxyHealthy, startProxy } from '../proxy/proxyManager';
+import { isDatabaseHealthy } from '../database/connectionManager';
 
 /**
  * Notes API Route
  * Handles CRUD operations for notes with GCP database integration
  * Follows project standards for authentication and error handling
+ * Uses direct SSL connection in production for better reliability
  */
 
 // Dynamic import for CommonJS modules
-let gcpDatabaseServicePromise = null;
-function getGcpDatabaseService() {
-  if (!gcpDatabaseServicePromise) {
-    // Use a relative path instead of process.cwd()
-    gcpDatabaseServicePromise = import('../../../backend/services/gcpDatabaseService.js')
+let databaseServicePromise = null;
+function getDatabaseService() {
+  if (!databaseServicePromise) {
+    // In production, use the serverless database service
+    // In development, use the GCP database service with proxy
+    const servicePath = process.env.NODE_ENV === 'production'
+      ? '../../../backend/services/serverlessDatabaseService.js'
+      : '../../../backend/services/gcpDatabaseService.js';
+      
+    databaseServicePromise = import(servicePath)
       .then(module => {
         // Handle both ESM default exports and CommonJS module.exports
         return module.default || module;
       })
       .catch(err => {
-        console.error('Error importing GCP database service:', err);
+        console.error('Error importing database service:', err);
         return null;
       });
   }
-  return gcpDatabaseServicePromise;
+  return databaseServicePromise;
 }
 
 /**
@@ -33,23 +39,33 @@ function getGcpDatabaseService() {
  */
 async function ensureDatabaseConnection() {
   try {
-    // Check if proxy is healthy
-    const healthy = await isProxyHealthy();
-    
-    // If not healthy, try to start it
-    if (!healthy) {
-      console.log('Database proxy not healthy, attempting to start...');
-      const result = await startProxy();
+    // In production, we use direct SSL connection, so just check if it's healthy
+    // In development, we still use the proxy approach
+    if (process.env.NODE_ENV === 'production') {
+      const healthy = await isDatabaseHealthy();
+      return healthy;
+    } else {
+      // For development, import and use the proxy manager
+      const { isProxyHealthy, startProxy } = await import('../proxy/proxyManager');
       
-      // Wait a moment for the proxy to initialize
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Check if proxy is healthy
+      const healthy = await isProxyHealthy();
       
-      // Check health again after starting
-      const healthyAfterStart = await isProxyHealthy();
-      return healthyAfterStart;
+      // If not healthy, try to start it
+      if (!healthy) {
+        console.log('Database proxy not healthy, attempting to start...');
+        const result = await startProxy();
+        
+        // Wait a moment for the proxy to initialize
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        // Check health again after starting
+        const healthyAfterStart = await isProxyHealthy();
+        return healthyAfterStart;
+      }
+      
+      return true;
     }
-    
-    return true;
   } catch (error) {
     console.error('Error ensuring database connection:', error);
     return false;
@@ -82,9 +98,9 @@ export async function GET(request) {
     const patientId = url.searchParams.get('patientId');
     
     // Get the GCP database service
-    const gcpDatabaseService = await getGcpDatabaseService();
+    const databaseService = await getDatabaseService();
     
-    if (!gcpDatabaseService) {
+    if (!databaseService) {
       console.error('GCP database service not available');
       return formatApiResponse(null, 'Database service unavailable', 500);
     }
@@ -100,7 +116,7 @@ export async function GET(request) {
       };
       
       // Get notes with proper options object
-      const notes = await gcpDatabaseService.getNotes(userId, options);
+      const notes = await databaseService.getNotes(userId, options);
       
       // Return notes
       return formatApiResponse(notes);
@@ -187,12 +203,12 @@ export async function POST(request) {
     
     // Save the note to the database
     try {
-      const gcpDatabaseService = await getGcpDatabaseService();
-      if (!gcpDatabaseService) {
+      const databaseService = await getDatabaseService();
+      if (!databaseService) {
         console.error('GCP database service not available');
         return formatApiResponse(null, 'Database service unavailable', 500);
       }
-      const savedNote = await gcpDatabaseService.createNote(noteData);
+      const savedNote = await databaseService.createNote(noteData);
       // Return the saved note
       return formatApiResponse(savedNote);
     } catch (dbError) {

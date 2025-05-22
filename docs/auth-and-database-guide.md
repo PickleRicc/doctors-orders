@@ -96,7 +96,52 @@ The system implements a comprehensive error handling strategy:
 
 ## Implementation Details
 
-### 1. Authentication Utility (`app/api/auth/authUtils.js`)
+### 1. Client-Side Token Retrieval (`app/services/transcriptionService.js`)
+
+The application uses a robust token retrieval mechanism that works across different Supabase versions and environments:
+
+```javascript
+// Helper function to get auth token from Supabase
+async function getAuthToken() {
+  // For development, use a mock token
+  if (process.env.NODE_ENV === 'development') {
+    return 'dev-token';
+  }
+  
+  try {
+    // Try the modern @supabase/ssr approach first
+    const { createBrowserClient } = await import('@supabase/ssr');
+    if (createBrowserClient) {
+      const supabase = createBrowserClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+      );
+      const { data } = await supabase.auth.getSession();
+      if (data?.session?.access_token) {
+        return data.session.access_token;
+      }
+    }
+    
+    // Check for the new Supabase storage key format
+    const projectRef = process.env.NEXT_PUBLIC_SUPABASE_URL
+      ?.replace(/^https?:\/\//, '')
+      .replace(/\..*/, '');
+    const sbAuthData = localStorage.getItem(`sb-${projectRef}-auth-token`);
+    if (sbAuthData) {
+      const authData = JSON.parse(sbAuthData);
+      if (authData.access_token) {
+        return authData.access_token;
+      }
+    }
+    
+    // Additional fallback methods...
+  } catch (error) {
+    // Error handling and fallbacks
+  }
+}
+```
+
+### 2. Server-Side Authentication Utility (`app/api/auth/authUtils.js`)
 
 ```javascript
 // Validates the authentication token from the request
@@ -235,6 +280,7 @@ Common issues and their solutions:
    - Check that the JWT token is valid and not expired
    - Ensure the Authorization header is correctly formatted
    - Verify that the user exists in Supabase
+   - For production environments, ensure the token retrieval method is compatible with the Supabase version
 
 3. **Database Connection Issues**:
    - Use `npm run proxy:restart` to restart the proxy
@@ -246,7 +292,8 @@ Common issues and their solutions:
 To adapt this architecture for a new project:
 
 1. **Authentication Setup**:
-   - Copy `authUtils.js` to your new project
+   - Copy `authUtils.js` for server-side authentication
+   - Copy the `getAuthToken()` function from `transcriptionService.js` for client-side token retrieval
    - Update Supabase configuration with your project details
    - Implement the same token validation pattern in your API routes
 
@@ -263,6 +310,7 @@ To adapt this architecture for a new project:
    ```
    # Supabase
    NEXT_PUBLIC_SUPABASE_URL=your-supabase-url
+   NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
    SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
    
    # Google Cloud SQL
@@ -290,6 +338,7 @@ To adapt this architecture for a new project:
 1. **Separation of Concerns**:
    - Keep authentication logic separate from database logic
    - Use utility functions for common operations
+   - Separate client-side and server-side authentication handling
 
 2. **Error Handling**:
    - Always provide clear error messages
@@ -300,6 +349,7 @@ To adapt this architecture for a new project:
    - Never expose database credentials in client-side code
    - Always validate authentication before accessing data
    - Use environment variables for sensitive information
+   - Implement robust token retrieval that works across different environments
 
 4. **Monitoring and Logging**:
    - Log important events and errors

@@ -1,16 +1,23 @@
 /**
  * Templates API Route
- * Handles fetching templates from the GCP database
+ * Handles fetching templates from the database
+ * Uses direct SSL connection in production for better reliability
  */
 
 import { NextResponse } from 'next/server';
 import { validateAuthToken, formatApiResponse } from '../auth/authUtils';
-import { isProxyHealthy, startProxy } from '../proxy/proxyManager';
+import { isDatabaseHealthy } from '../database/connectionManager';
 
 // Dynamic import to avoid SSR issues
 const getDatabaseService = async () => {
-  const { default: gcpDatabaseService } = await import('../../../backend/services/gcpDatabaseService');
-  return gcpDatabaseService;
+  // In production, use the serverless database service
+  // In development, use the GCP database service with proxy
+  const servicePath = process.env.NODE_ENV === 'production'
+    ? '../../../backend/services/serverlessDatabaseService.js'
+    : '../../../backend/services/gcpDatabaseService.js';
+    
+  const module = await import(servicePath);
+  return module.default || module;
 };
 
 /**
@@ -19,17 +26,25 @@ const getDatabaseService = async () => {
  */
 async function ensureDatabaseConnection() {
   try {
-    // Check if proxy is healthy
-    const healthy = await isProxyHealthy();
-    
-    // If not healthy, try to start it
-    if (!healthy) {
-      console.log('Database proxy not healthy, attempting to start...');
-      const result = await startProxy();
-      return result.healthy;
+    // In production, we use direct SSL connection, so just check if it's healthy
+    if (process.env.NODE_ENV === 'production') {
+      return await isDatabaseHealthy();
+    } else {
+      // For development, import and use the proxy manager
+      const { isProxyHealthy, startProxy } = await import('../proxy/proxyManager');
+      
+      // Check if proxy is healthy
+      const healthy = await isProxyHealthy();
+      
+      // If not healthy, try to start it
+      if (!healthy) {
+        console.log('Database proxy not healthy, attempting to start...');
+        const result = await startProxy();
+        return result.healthy;
+      }
+      
+      return true;
     }
-    
-    return true;
   } catch (error) {
     console.error('Error ensuring database connection:', error);
     return false;
