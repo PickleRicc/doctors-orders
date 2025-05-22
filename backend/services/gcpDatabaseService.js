@@ -9,34 +9,47 @@ const { v4: uuidv4 } = require('uuid');
 class GcpDatabaseService {
   constructor() {
     // Log connection details for debugging
-    console.log('Initializing GCP Database Service with:');
-    console.log(`Host: ${process.env.GCP_DB_HOST}`);
-    console.log(`Port: ${process.env.GCP_DB_PORT || 5432}`);
+    console.log('Initializing GCP Database Service');
+    
+    // Determine environment-specific settings
+    const isProduction = process.env.NODE_ENV === 'production';
+    const host = isProduction ? '127.0.0.1' : process.env.GCP_DB_HOST || '127.0.0.1';
+    const port = process.env.GCP_DB_PORT || 5432;
+    
+    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`Host: ${host}`);
+    console.log(`Port: ${port}`);
     console.log(`Database: ${process.env.GCP_DB_NAME}`);
     console.log(`User: ${process.env.GCP_DB_USER}`);
     
-    // Initialize connection pool
+    // Initialize connection pool with proper settings
     this.pool = new Pool({
       user: process.env.GCP_DB_USER,
-      host: process.env.NODE_ENV === 'production' ? '127.0.0.1' : process.env.GCP_DB_HOST, // Use localhost in production for proxy
+      host,
       database: process.env.GCP_DB_NAME,
       password: process.env.GCP_DB_PASSWORD,
-      port: process.env.GCP_DB_PORT || 5432,
-      ssl: process.env.NODE_ENV === 'production' ? false : process.env.NODE_ENV === 'production', // Disable SSL when using proxy
-      max: 20, // Maximum number of clients in the pool
-      idleTimeoutMillis: 30000, // How long a client is allowed to remain idle before being closed
-      connectionTimeoutMillis: 5000, // How long to wait for a connection (increased for debugging)
+      port,
+      ssl: false, // SSL is handled by the proxy in production
+      max: isProduction ? 20 : 5, // More connections in production
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 5000,
     });
-
+    
     // Handle pool errors
     this.pool.on('error', (err) => {
       console.error('Unexpected error on idle client', err);
       console.error('Error details:', JSON.stringify(err, null, 2));
       // Don't exit process during development
-      if (process.env.NODE_ENV === 'production') {
-        process.exit(-1);
+      if (isProduction) {
+        // In production, log but don't exit to prevent cascading failures
+        console.error('Database pool error in production:', err);
       }
     });
+    
+    console.log('GCP Database Service initialized');
+    
+    // Verify connection on startup
+    this._verifyConnection();
 
     console.log('GCP Database Service initialized');
   }
@@ -55,15 +68,41 @@ class GcpDatabaseService {
    * @param {Array} params - Query parameters
    * @returns {Promise<Object>} Query result
    */
-  async query(text, params) {
+  /**
+   * Execute a query with parameters and retry logic
+   * @param {string} text - SQL query text
+   * @param {Array} params - Query parameters
+   * @param {number} retryCount - Number of retries on connection errors
+   * @returns {Promise<Object>} Query result
+   */
+  async query(text, params, retryCount = 1) {
     const start = Date.now();
     try {
+      // Try to ensure proxy is running before executing query
+      const proxyReady = await this._ensureProxyConnection();
+      
+      if (!proxyReady) {
+        throw new Error('Database connection unavailable. The Cloud SQL Proxy could not be started due to a port conflict or other issue.');
+      }
+      
       const res = await this.pool.query(text, params);
       const duration = Date.now() - start;
       console.log('Executed query', { text, duration, rows: res.rowCount });
       return res;
     } catch (error) {
       console.error('Error executing query', { text, error });
+      
+      // Retry on connection errors if retry count allows
+      if (retryCount > 0 && (
+        error.code === 'ECONNREFUSED' || 
+        error.code === 'ETIMEDOUT' ||
+        error.code === '57P01' // terminating connection due to administrator command
+      )) {
+        console.log(`Retrying query, ${retryCount} attempts remaining...`);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        return this.query(text, params, retryCount - 1);
+      }
+      
       throw error;
     }
   }
@@ -73,6 +112,167 @@ class GcpDatabaseService {
    * @param {Function} callback - Function that executes queries within the transaction
    * @returns {Promise<any>} Result of the transaction
    */
+  /**
+   * Verify database connection and start proxy if needed
+   * @private
+   */
+  async _verifyConnection() {
+    try {
+      await this.pool.query('SELECT 1');
+      console.log('✅ Database connection verified');
+    } catch (error) {
+      console.error('❌ Database connection failed:', error.message);
+      
+      // In development, try to start proxy
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('Attempting to start proxy...');
+        await this._startProxy();
+      } else {
+        // In production, try to ensure proxy is running via API
+        await this._ensureProductionProxy();
+      }
+    }
+  }
+  
+  /**
+   * Ensure the Cloud SQL Proxy is running
+   * @private
+   */
+  async _ensureProxyConnection() {
+    try {
+      // Simple test query to check connection
+      await this.pool.query('SELECT 1', [], 0); // No retries for this check
+      return true; // Connection successful
+    } catch (error) {
+      console.log('Database connection failed, attempting to start proxy...');
+      
+      if (process.env.NODE_ENV === 'production') {
+        return await this._ensureProductionProxy();
+      } else {
+        return await this._startProxy();
+      }
+    }
+  }
+  
+  /**
+   * Start the Cloud SQL Proxy locally
+   * @private
+   * @returns {Promise<boolean>} Whether the proxy was started successfully
+   */
+  async _startProxy() {
+    try {
+      // Get the base URL dynamically
+      const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
+      
+      // Try to start the proxy via the API route
+      const response = await fetch(`${baseUrl}/api/proxy`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (!response.ok) {
+        console.error('Failed to start proxy via API');
+        return false;
+      }
+      
+      const result = await response.json();
+      console.log('Proxy start result:', result);
+      
+      // Handle different proxy statuses
+      if (result.status === 'port_conflict') {
+        console.error(result.message);
+        // Show a more user-friendly message about the port conflict
+        console.error('Another application is using the PostgreSQL port (5432). This could be:');
+        console.error('1. Another instance of the Cloud SQL Proxy');
+        console.error('2. A local PostgreSQL server');
+        console.error('3. Another database application');
+        console.error('Please close the conflicting application or change the GCP_DB_PORT environment variable.');
+        return false;
+      }
+      
+      if (result.status === 'external_proxy_detected' || result.status === 'already_running') {
+        console.log('Using existing proxy connection');
+        return result.healthy;
+      }
+      
+      if (result.status === 'started') {
+        // Wait a moment for the proxy to initialize
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        return result.healthy;
+      }
+      
+      return false;
+    } catch (error) {
+      console.error('Error starting proxy:', error);
+      return false;
+    }
+  }
+  
+  /**
+   * Ensure proxy is running in production environment
+   * @private
+   * @returns {Promise<boolean>} Whether the proxy is running in production
+   */
+  async _ensureProductionProxy() {
+    try {
+      // In production, check if proxy is running via the API
+      const baseUrl = process.env.FRONTEND_URL || 'https://doctors-orders-sigma.vercel.app';
+      
+      const response = await fetch(`${baseUrl}/api/proxy?check=true`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (!response.ok) {
+        console.error('Failed to check proxy status');
+        return false;
+      }
+      
+      const result = await response.json();
+      
+      if (result.status === 'healthy') {
+        console.log('Proxy is healthy in production');
+        return true;
+      }
+      
+      console.log('Proxy not healthy, attempting to start...');
+      
+      // Try to start the proxy
+      const startResponse = await fetch(`${baseUrl}/api/proxy`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (!startResponse.ok) {
+        console.error('Failed to start proxy in production');
+        return false;
+      }
+      
+      const startResult = await startResponse.json();
+      console.log('Proxy start result:', startResult);
+      
+      // Wait for proxy to initialize
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
+      // Check if the proxy started successfully
+      if (startResult.status === 'port_conflict') {
+        console.error('Port conflict detected in production environment');
+        return false;
+      }
+      
+      return startResult.healthy || false;
+    } catch (error) {
+      console.error('Error ensuring production proxy:', error);
+      return false;
+    }
+  }
+  
   async withTransaction(callback) {
     const client = await this.getClient();
     try {

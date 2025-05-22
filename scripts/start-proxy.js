@@ -70,9 +70,12 @@ console.log(`Port: ${process.env.GCP_DB_PORT}`);
 console.log(`Database: ${process.env.GCP_DB_NAME}`);
 console.log(`User: ${process.env.GCP_DB_USER}`);
 
-// Start the proxy
+// Start the proxy with additional parameters for better stability
 const proxy = spawn(PROXY_PATH, [
   `--credentials-file=${KEY_FILE}`,
+  '--structured-logs',
+  '--max-connections=10',
+  '--auto-iam-authn',
   connectionName
 ]);
 
@@ -85,9 +88,57 @@ proxy.stderr.on('data', (data) => {
   console.error(`[SQL Proxy Error] ${data.toString().trim()}`);
 });
 
+// Handle proxy exit and restart if needed
 proxy.on('close', (code) => {
   console.log(`Cloud SQL Proxy exited with code ${code}`);
+  
+  // If the proxy exits with an error, restart it after a delay
+  if (code !== 0 && code !== null) {
+    console.log('Proxy exited with error, attempting to restart in 5 seconds...');
+    setTimeout(() => {
+      console.log('Restarting Cloud SQL Proxy...');
+      // Restart the script
+      const newProcess = spawn(process.argv[0], [process.argv[1]], {
+        detached: true,
+        stdio: 'inherit'
+      });
+      
+      // Exit this process
+      process.exit(0);
+    }, 5000);
+  }
 });
+
+// Log when the proxy is ready
+let isReady = false;
+const checkConnection = async () => {
+  try {
+    // Try to connect to the database to verify the proxy is working
+    const { Pool } = require('pg');
+    const pool = new Pool({
+      user: process.env.GCP_DB_USER,
+      host: '127.0.0.1',
+      database: process.env.GCP_DB_NAME,
+      password: process.env.GCP_DB_PASSWORD,
+      port: process.env.GCP_DB_PORT || 5432,
+      ssl: false,
+      connectionTimeoutMillis: 5000,
+    });
+    
+    await pool.query('SELECT 1');
+    console.log('✅ Cloud SQL Proxy connection verified!');
+    isReady = true;
+    pool.end();
+  } catch (error) {
+    if (!isReady) {
+      console.log('Waiting for proxy connection to be established...');
+      setTimeout(checkConnection, 2000);
+    }
+  }
+};
+
+// Start checking connection after a short delay
+setTimeout(checkConnection, 3000);
 
 // Handle process termination
 process.on('SIGINT', () => {

@@ -255,25 +255,81 @@ async function getAuthToken() {
   }
   
   try {
-    // In production, get the token from local storage
-    // This assumes the token is stored during login
+    // In production, get the token from Supabase client
+    // First try to get it from the Supabase client directly if available
+    if (typeof window !== 'undefined' && window.supabase) {
+      try {
+        const { data } = await window.supabase.auth.getSession();
+        if (data && data.session && data.session.access_token) {
+          return data.session.access_token;
+        }
+      } catch (e) {
+        console.log('Could not get token from Supabase client:', e);
+        // Continue to fallback methods
+      }
+    }
+    
+    // Fallback to storage methods
     const getTokenFromStorage = () => {
+      if (typeof window === 'undefined') return null;
+      
+      // Try to parse the Supabase cookie first (most reliable)
+      try {
+        const cookies = document.cookie.split(';');
+        for (const cookie of cookies) {
+          const [name, value] = cookie.trim().split('=');
+          if (name === 'sb-access-token') {
+            return decodeURIComponent(value);
+          }
+        }
+      } catch (e) {
+        console.log('Error parsing cookies:', e);
+      }
+      
       // Check different possible storage keys
       const possibleKeys = [
+        'sb:token',  // New Supabase key format
         'supabase.auth.token',
         'sb-auth-token',
         'supabase.auth.access_token'
       ];
       
+      // Check localStorage
       for (const key of possibleKeys) {
-        const token = localStorage.getItem(key);
-        if (token) return token;
+        try {
+          const item = localStorage.getItem(key);
+          if (item) {
+            // Handle both raw tokens and JSON objects
+            try {
+              const parsed = JSON.parse(item);
+              if (parsed.access_token) return parsed.access_token;
+              if (parsed.token && parsed.token.access_token) return parsed.token.access_token;
+            } catch {
+              // If not JSON, it might be the raw token
+              return item;
+            }
+          }
+        } catch (e) {
+          console.log(`Error accessing localStorage key ${key}:`, e);
+        }
       }
       
-      // Try to get from session storage as well
+      // Try session storage as last resort
       for (const key of possibleKeys) {
-        const token = sessionStorage.getItem(key);
-        if (token) return token;
+        try {
+          const item = sessionStorage.getItem(key);
+          if (item) {
+            try {
+              const parsed = JSON.parse(item);
+              if (parsed.access_token) return parsed.access_token;
+              if (parsed.token && parsed.token.access_token) return parsed.token.access_token;
+            } catch {
+              return item;
+            }
+          }
+        } catch (e) {
+          console.log(`Error accessing sessionStorage key ${key}:`, e);
+        }
       }
       
       return null;
@@ -285,10 +341,16 @@ async function getAuthToken() {
       return token;
     }
     
-    // If no token is found, redirect to sign-in page
-    console.warn('No auth token found, redirecting to sign-in page');
-    window.location.href = '/auth/signin?redirectTo=' + encodeURIComponent(window.location.pathname);
-    return null;
+    // If no token is found, redirect to sign-in page but don't do it immediately
+    // This prevents redirect loops
+    console.warn('No auth token found, will redirect to sign-in page');
+    setTimeout(() => {
+      window.location.href = '/auth/signin?redirectTo=' + encodeURIComponent(window.location.pathname);
+    }, 100);
+    
+    // Return a temporary token to prevent immediate errors
+    // The redirect will happen before this token is used
+    return 'redirecting';
   } catch (error) {
     console.error('Error getting auth token:', error);
     
@@ -297,8 +359,10 @@ async function getAuthToken() {
       return 'dev-token';
     }
     
-    // In production with error, redirect to sign-in page
-    window.location.href = '/auth/signin?redirectTo=' + encodeURIComponent(window.location.pathname);
+    // In production with error, redirect to sign-in page with a delay
+    setTimeout(() => {
+      window.location.href = '/auth/signin?redirectTo=' + encodeURIComponent(window.location.pathname);
+    }, 100);
     throw error;
   }
 }

@@ -262,12 +262,17 @@ export default function DictationModal({ isOpen, onClose }) {
     { id: 4, name: "Emily Wilson", dob: "1965-09-30" }
   ];
 
+  // State for template loading errors
+  const [templateError, setTemplateError] = useState(null);
+
   // Fetch templates from database when component mounts
   useEffect(() => {
     async function fetchTemplates() {
       if (!isOpen) return;
       
       setIsLoadingTemplates(true);
+      setTemplateError(null);
+      
       try {
         const fetchedTemplates = await getTemplates({ isActive: true });
         console.log('Fetched templates:', fetchedTemplates);
@@ -295,6 +300,15 @@ export default function DictationModal({ isOpen, onClose }) {
         }
       } catch (error) {
         console.error('Error fetching templates:', error);
+        
+        // Check for specific error types
+        if (error.message && error.message.includes('Database connection unavailable')) {
+          setTemplateError('Database connection issue. Please restart the application.');
+        } else if (error.message && error.message.includes('port conflict')) {
+          setTemplateError('Database port conflict detected. Please restart the application.');
+        } else {
+          setTemplateError('Could not load templates from database. Using default template.');
+        }
         
         // Use fallback templates if fetch fails
         const fallbackTemplates = [
@@ -639,71 +653,75 @@ export default function DictationModal({ isOpen, onClose }) {
         {/* Modal Content */}
         <div className="relative z-10 p-5 overflow-y-auto">
           {/* Header */}
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold flex items-center">
-              <Mic size={20} className="mr-2 text-royal" />
-              Voice Dictation
-            </h2>
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-xl font-semibold text-gray-800">Voice Dictation</h2>
             <button 
+              type="button" 
+              className="p-1 rounded-full hover:bg-gray-100"
               onClick={onClose}
-              className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+              disabled={isRecording && !isPaused}
             >
               <X size={18} className="text-gray-500" />
             </button>
           </div>
-          
           {/* Pre-recording options */}
           {!isRecording && !recordingFinished && (
             <div className="mb-6 space-y-4">
-              {/* Template Selector */}
-              <div>
-                <div 
-                  className="flex items-center justify-between p-3 bg-gray-100 rounded-lg cursor-pointer"
-                  onClick={() => setShowTemplateSelector(!showTemplateSelector)}
-                >
-                  <div className="flex items-center">
-                    <FileText size={18} className="mr-2 text-royal" />
-                    <span>
-                      {isLoadingTemplates ? (
-                        "Loading templates..."
-                      ) : (
-                        `Template: ${templates.find(t => t.id === selectedTemplate)?.name || 'Select template'}`
-                      )}
-                    </span>
-                  </div>
-                  <ChevronDown size={18} className={`transition-transform ${showTemplateSelector ? 'rotate-180' : ''}`} />
+              {/* Template selector */}
+              <div className="mb-4">
+                <div className="flex items-center justify-between">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Template</label>
+                  <button 
+                    type="button"
+                    onClick={() => setShowTemplateSelector(!showTemplateSelector)}
+                    className="text-xs text-blue-600 hover:text-blue-800"
+                  >
+                    {showTemplateSelector ? 'Hide' : 'Change'}
+                  </button>
                 </div>
                 
-                {showTemplateSelector && (
-                  <div className="mt-2 border border-gray-200 rounded-lg overflow-hidden">
-                    {isLoadingTemplates ? (
-                      <div className="p-3 text-center text-gray-500">
-                        Loading templates...
-                      </div>
-                    ) : templates.length === 0 ? (
-                      <div className="p-3 text-center text-gray-500">
-                        No templates available
-                      </div>
-                    ) : (
-                      templates.map(template => (
-                        <div 
-                          key={template.id}
-                          className={`p-3 cursor-pointer hover:bg-gray-100 ${selectedTemplate === template.id ? 'bg-gray-100' : ''}`}
-                          onClick={() => {
-                            setSelectedTemplate(template.id);
-                            setShowTemplateSelector(false);
-                          }}
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="font-medium">{template.name}</span>
-                            {selectedTemplate === template.id && <Check size={16} className="text-royal" />}
+                {templateError && (
+                  <div className="mb-2 p-2 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md">
+                    <div className="flex items-center">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                      </svg>
+                      {templateError}
+                    </div>
+                  </div>
+                )}
+                
+                {isLoadingTemplates ? (
+                  <div className="flex items-center space-x-2 text-sm text-gray-500">
+                    <div className="animate-spin h-4 w-4 border-2 border-blue-500 rounded-full border-t-transparent"></div>
+                    <span>Loading templates...</span>
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <div 
+                      className="p-2 border rounded-md flex items-center justify-between cursor-pointer hover:bg-gray-50"
+                      onClick={() => setShowTemplateSelector(!showTemplateSelector)}
+                    >
+                      <span>{selectedTemplateObj?.name || 'Select template'}</span>
+                      <ChevronDown className="h-4 w-4 text-gray-500" />
+                    </div>
+                    
+                    {showTemplateSelector && (
+                      <div className="absolute z-10 mt-1 w-full bg-white border rounded-md shadow-lg max-h-60 overflow-auto">
+                        {templates.map(template => (
+                          <div 
+                            key={template.id}
+                            className={`p-2 cursor-pointer hover:bg-blue-50 ${selectedTemplate === template.id ? 'bg-blue-100' : ''}`}
+                            onClick={() => {
+                              setSelectedTemplate(template.id);
+                              setShowTemplateSelector(false);
+                            }}
+                          >
+                            <div className="font-medium">{template.name}</div>
+                            <div className="text-xs text-gray-500">{template.description}</div>
                           </div>
-                          <p className="text-sm text-gray-500 mt-1">{template.description || 'No description available'}</p>
-                          {template.specialty && (
-                            <p className="text-xs text-royal mt-1">Specialty: {template.specialty}</p>
-                          )}
-                        </div>
-                      ))
+                        ))}
+                      </div>
                     )}
                   </div>
                 )}

@@ -6,7 +6,12 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "proxy:start": "node scripts/manage-proxy.js start",
+    "proxy:stop": "node scripts/manage-proxy.js stop",
+    "proxy:status": "node scripts/manage-proxy.js status",
+    "proxy:restart": "node scripts/manage-proxy.js restart",
+    "dev:with-proxy": "npm run proxy:start && npm run dev"
   },
   "dependencies": {
     "@google-cloud/language": "^7.0.2",

@@ -1,10 +1,13 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 import { v4 as uuidv4 } from 'uuid';
+import { validateAuthToken, formatApiResponse } from '../auth/authUtils';
+import { isProxyHealthy, startProxy } from '../proxy/proxyManager';
 
-// Initialize Supabase client
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+/**
+ * Notes API Route
+ * Handles CRUD operations for notes with GCP database integration
+ * Follows project standards for authentication and error handling
+ */
 
 // Dynamic import for CommonJS modules
 let gcpDatabaseServicePromise = null;
@@ -24,30 +27,31 @@ function getGcpDatabaseService() {
   return gcpDatabaseServicePromise;
 }
 
-// Helper function to ensure proxy is running in production
-async function ensureProxyRunning() {
-  // Only needed in production
-  if (process.env.NODE_ENV !== 'production') {
-    return true;
-  }
-  
+/**
+ * Helper function to ensure database connection is available
+ * @returns {Promise<boolean>} Whether the database is connected
+ */
+async function ensureDatabaseConnection() {
   try {
-    console.log('Checking if Cloud SQL Proxy is running...');
-    // Make a request to the proxy endpoint
-    const response = await fetch(`${process.env.FRONTEND_URL || 'https://doctors-orders-sigma.vercel.app'}/api/proxy`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
+    // Check if proxy is healthy
+    const healthy = await isProxyHealthy();
     
-    const data = await response.json();
-    console.log('Proxy status:', data);
+    // If not healthy, try to start it
+    if (!healthy) {
+      console.log('Database proxy not healthy, attempting to start...');
+      const result = await startProxy();
+      
+      // Wait a moment for the proxy to initialize
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Check health again after starting
+      const healthyAfterStart = await isProxyHealthy();
+      return healthyAfterStart;
+    }
     
-    // If already running or started successfully, return true
-    return data.status === 'already_running' || data.status === 'started';
+    return true;
   } catch (error) {
-    console.error('Error ensuring proxy is running:', error);
+    console.error('Error ensuring database connection:', error);
     return false;
   }
 }
@@ -57,55 +61,19 @@ async function ensureProxyRunning() {
  * Get all notes for the authenticated user
  */
 export async function GET(request) {
-  // Ensure proxy is running in production
-  const proxyReady = await ensureProxyRunning();
-  if (!proxyReady && process.env.NODE_ENV === 'production') {
-    return NextResponse.json({
-      data: null,
-      error: 'Database connection not available. Please try again in a moment.'
-    }, { status: 503 });
+  // Ensure database connection is available
+  const connected = await ensureDatabaseConnection();
+  if (!connected) {
+    return formatApiResponse(
+      null, 
+      'Database connection not available. Please try again in a moment.',
+      503
+    );
   }
   
   try {
-    // Verify authentication (optional in dev)
-    const authHeader = request.headers.get('authorization');
-    // Use a valid UUID for dev mode instead of a string
-    let userId = '00000000-0000-0000-0000-000000000000'; // Valid UUID for dev mode
-    
-    if (process.env.NODE_ENV === 'production') {
-      if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return NextResponse.json(
-          { data: null, error: 'Unauthorized' },
-          { status: 401 }
-        );
-      }
-      
-      const token = authHeader.replace('Bearer ', '');
-      
-      // Initialize Supabase client properly
-      const supabase = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL,
-        process.env.SUPABASE_SERVICE_ROLE_KEY,
-        {
-          global: {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          },
-        }
-      );
-      
-      const { data: { user }, error } = await supabase.auth.getUser();
-      
-      if (error || !user) {
-        return NextResponse.json(
-          { data: null, error: 'Invalid token' },
-          { status: 401 }
-        );
-      }
-      
-      userId = user.id;
-    }
+    // Validate authentication using our utility
+    const userId = await validateAuthToken(request);
     
     // Get query parameters for filtering and pagination
     const url = new URL(request.url);
@@ -118,37 +86,67 @@ export async function GET(request) {
     
     if (!gcpDatabaseService) {
       console.error('GCP database service not available');
-      return NextResponse.json(
-        { data: null, error: 'Database service unavailable' },
-        { status: 500 }
-      );
+      return formatApiResponse(null, 'Database service unavailable', 500);
     }
     
     try {
-      // Query the database for user's notes
-      const notes = await gcpDatabaseService.getNotes(userId, {
+      // Create options object with query parameters
+      const options = {
         limit,
         offset,
-        patientId
-      });
+        patientId: patientId || null,
+        sortBy: 'created_at',
+        sortOrder: 'DESC'
+      };
       
-      return NextResponse.json({
-        data: notes,
-        error: null
-      });
+      // Get notes with proper options object
+      const notes = await gcpDatabaseService.getNotes(userId, options);
+      
+      // Return notes
+      return formatApiResponse(notes);
     } catch (dbError) {
-      console.error('Error retrieving from database:', dbError);
-      return NextResponse.json(
-        { data: null, error: `Database error: ${dbError.message}` },
-        { status: 500 }
+      console.error('Database error fetching notes:', dbError);
+      
+      // Check for port conflict or proxy issues
+      if (dbError.message && (dbError.message.includes('port conflict') || 
+                             dbError.message.includes('connection refused') ||
+                             dbError.message.includes('database connection unavailable'))) {
+        return formatApiResponse(
+          null,
+          'Database connection unavailable. This may be due to a port conflict. Please restart the application or contact support.',
+          503
+        );
+      }
+      
+      // For development, return empty notes array instead of error
+      if (process.env.NODE_ENV === 'development') {
+        console.log('Using empty notes array due to database error in development');
+        return formatApiResponse([]);
+      }
+      
+      throw dbError; // Re-throw to be caught by outer catch
+    }
+    
+  } catch (error) {
+    console.error('Error fetching notes:', error);
+    
+    // Handle authentication errors specifically
+    if (error.message.includes('Unauthorized')) {
+      return formatApiResponse(null, error.message, 401);
+    }
+    
+    // Handle database connection errors with a more user-friendly message
+    if (error.message.includes('database connection unavailable') || 
+        error.message.includes('port conflict') ||
+        error.message.includes('connection refused')) {
+      return formatApiResponse(
+        null, 
+        'Database connection unavailable. This may be due to a port conflict. Please restart the application or contact support.',
+        503
       );
     }
-  } catch (error) {
-    console.error('Error getting notes:', error);
-    return NextResponse.json(
-      { data: null, error: `Failed to get notes: ${error.message}` },
-      { status: 500 }
-    );
+    
+    return formatApiResponse(null, error.message || 'Failed to fetch notes', 500);
   }
 }
 
@@ -157,175 +155,96 @@ export async function GET(request) {
  * Create a new note
  */
 export async function POST(request) {
-  // Ensure proxy is running in production
-  const proxyReady = await ensureProxyRunning();
-  if (!proxyReady && process.env.NODE_ENV === 'production') {
-    return NextResponse.json({
-      data: null,
-      error: 'Database connection not available. Please try again in a moment.'
-    }, { status: 503 });
+  // Ensure database connection is available
+  const connected = await ensureDatabaseConnection();
+  if (!connected) {
+    return formatApiResponse(
+      null, 
+      'Database connection not available. Please try again in a moment.',
+      503
+    );
   }
   
   try {
-    // Parse request body
-    const body = await request.json();
+    // Validate the authentication token and get user ID
+    const userId = await validateAuthToken(request);
     
-    if (!body.title || !body.transcript) {
-      return NextResponse.json(
-        { data: null, error: 'Title and transcript are required' },
-        { status: 400 }
-      );
+    // Parse the request body
+    const noteData = await request.json();
+    
+    // Validate required fields
+    if (!noteData.patient_id || !noteData.content) {
+      return formatApiResponse(null, 'Missing required fields: patient_id, content', 400);
     }
     
-    // Verify authentication (optional in dev)
-    const authHeader = request.headers.get('authorization');
-    // Use a valid UUID for dev mode instead of a string
-    let userId = '00000000-0000-0000-0000-000000000000'; // Valid UUID for dev mode
+    // Add the user ID to the note data
+    noteData.user_id = userId;
     
-    if (process.env.NODE_ENV === 'production') {
-      if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return NextResponse.json(
-          { data: null, error: 'Unauthorized' },
-          { status: 401 }
-        );
-      }
-      
-      const token = authHeader.replace('Bearer ', '');
-      
-      // Initialize Supabase client properly
-      const supabase = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL,
-        process.env.SUPABASE_SERVICE_ROLE_KEY,
-        {
-          global: {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          },
-        }
-      );
-      
-      const { data: { user }, error } = await supabase.auth.getUser();
-      
-      if (error || !user) {
-        return NextResponse.json(
-          { data: null, error: 'Invalid token' },
-          { status: 401 }
-        );
-      }
-      
-      userId = user.id;
+    // Add created_at timestamp if not provided
+    if (!noteData.created_at) {
+      noteData.created_at = new Date().toISOString();
     }
     
-    // Get the GCP database service
-    const gcpDatabaseService = await getGcpDatabaseService();
-    
-    if (!gcpDatabaseService) {
-      console.error('GCP database service not available');
-      return NextResponse.json(
-        { data: null, error: 'Database service unavailable' },
-        { status: 500 }
-      );
-    }
-    
+    // Save the note to the database
     try {
-      // Extract patient info or create a new patient if needed
-      let patientId = null;
-      if (body.patient) {
-        // Local implementation of findOrCreatePatient since it doesn't exist in the service
-        const patientData = body.patient;
-        
-        try {
-          // First try to find the patient by MRN if provided
-          if (patientData.mrn) {
-            // Search for patients with this MRN
-            const patientsResult = await gcpDatabaseService.getPatients(userId, {
-              searchTerm: patientData.mrn
-            });
-            
-            if (patientsResult.patients && patientsResult.patients.length > 0) {
-              // Found a patient with this MRN
-              patientId = patientsResult.patients[0].id;
-              console.log(`Found existing patient with MRN ${patientData.mrn}, ID: ${patientId}`);
-            }
-          }
-          
-          // If no patient found by MRN, try by name
-          if (!patientId && patientData.name) {
-            const nameParts = patientData.name.split(' ');
-            const firstName = nameParts[0] || '';
-            const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
-            
-            const patientsResult = await gcpDatabaseService.getPatients(userId, {
-              searchTerm: patientData.name
-            });
-            
-            if (patientsResult.patients && patientsResult.patients.length > 0) {
-              // Found a patient with this name
-              patientId = patientsResult.patients[0].id;
-              console.log(`Found existing patient with name ${patientData.name}, ID: ${patientId}`);
-            }
-          }
-          
-          // If still no patient found, create a new one
-          if (!patientId) {
-            console.log('Creating new patient');
-            const nameParts = patientData.name ? patientData.name.split(' ') : ['Unknown', 'Patient'];
-            const firstName = nameParts[0] || 'Unknown';
-            const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : 'Patient';
-            
-            const newPatient = await gcpDatabaseService.createPatient({
-              userId: userId,
-              firstName: firstName,
-              lastName: lastName,
-              dateOfBirth: patientData.dob || null,
-              gender: patientData.gender || null,
-              mrn: patientData.mrn || null
-            });
-            
-            patientId = newPatient.id;
-            console.log(`Created new patient with ID: ${patientId}`);
-          }
-        } catch (patientError) {
-          console.error('Error handling patient data:', patientError);
-          // Continue without patient association if there's an error
-        }
+      const gcpDatabaseService = await getGcpDatabaseService();
+      if (!gcpDatabaseService) {
+        console.error('GCP database service not available');
+        return formatApiResponse(null, 'Database service unavailable', 500);
       }
-
-      // Create note in the database
-      const note = await gcpDatabaseService.createNote({
-        userId: userId,
-        patientId: patientId,
-        title: body.title,
-        transcript: body.transcript,
-        templateId: body.template?.id,
-        recordingTime: body.recordingTime,
-        soapData: body.soapData,
-        metadata: {
-          source: 'dictation',
-          timestamp: body.timestamp || new Date().toISOString()
-        }
-      });
-      
-      console.log('Note saved to GCP database:', note.id);
-      
-      // Return the created note
-      return NextResponse.json({
-        data: note,
-        error: null
-      });
+      const savedNote = await gcpDatabaseService.createNote(noteData);
+      // Return the saved note
+      return formatApiResponse(savedNote);
     } catch (dbError) {
-      console.error('Error saving to database:', dbError);
-      return NextResponse.json(
-        { data: null, error: `Database error: ${dbError.message}` },
-        { status: 500 }
-      );
+      console.error('Database error creating note:', dbError);
+      
+      // Check for port conflict or proxy issues
+      if (dbError.message && (dbError.message.includes('port conflict') || 
+                             dbError.message.includes('connection refused') ||
+                             dbError.message.includes('database connection unavailable'))) {
+        return formatApiResponse(
+          null,
+          'Database connection unavailable. This may be due to a port conflict. Please restart the application or contact support.',
+          503
+        );
+      }
+      
+      throw dbError; // Re-throw to be caught by outer catch
     }
+    
   } catch (error) {
     console.error('Error creating note:', error);
-    return NextResponse.json(
-      { data: null, error: `Failed to create note: ${error.message}` },
-      { status: 500 }
-    );
+    
+    // Handle authentication errors specifically
+    if (error.message.includes('Unauthorized')) {
+      return formatApiResponse(null, error.message, 401);
+    }
+    
+    // Handle database connection errors with a more user-friendly message
+    if (error.message.includes('database connection unavailable') || 
+        error.message.includes('port conflict') ||
+        error.message.includes('connection refused')) {
+      return formatApiResponse(
+        null, 
+        'Database connection unavailable. This may be due to a port conflict. Please restart the application or contact support.',
+        503
+      );
+    }
+    
+    return formatApiResponse(null, error.message || 'Failed to create note', 500);
   }
+}
+
+/**
+ * OPTIONS /api/notes - Handle CORS preflight requests
+ */
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 204,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+    }
+  });
 }
