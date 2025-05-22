@@ -19,9 +19,9 @@ function getDatabaseService() {
       : '../../../../backend/services/gcpDatabaseService.js';
       
     databaseServicePromise = import(servicePath)
-      .then(module => {
+      .then(importedModule => {
         // Handle both ESM default exports and CommonJS module.exports
-        return module.default || module;
+        return importedModule.default || importedModule;
       })
       .catch(err => {
         console.error('Error importing database service:', err);

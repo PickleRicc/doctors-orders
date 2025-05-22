@@ -16,8 +16,8 @@ const getDatabaseService = async () => {
     ? '../../../backend/services/serverlessDatabaseService.js'
     : '../../../backend/services/gcpDatabaseService.js';
     
-  const module = await import(servicePath);
-  return module.default || module;
+  const importedModule = await import(servicePath);
+  return importedModule.default || importedModule;
 };
 
 /**
